@@ -192,7 +192,7 @@ while [ "$#" -gt 0 ]; do
       printf "%s\n" "${gl_hui}指定任意参数即进入静默安装；不带参数则为交互式安装。${reset}"
       printf "%s\n" "${gl_hui}未指定 -s 且本地无源码时，自动从 GitHub 拉取源码（可用 FAN_VIDEO_DL_REPO 自定义仓库/镜像）。${reset}"
       printf "%s\n" "${gl_hui}国内网络可设 FAN_VIDEO_DL_REPO=https://ghfast.top/https://github.com/meimolihan/fan-video-dl.git${reset}"
-      printf "%s\n" "${gl_hui}登录用户名/密码默认 admin/admin123，可用环境变量 AUTH_USERNAME / AUTH_PASSWORD 覆盖。${reset}"
+      printf "%s\n" "${gl_hui}登录用户名/密码默认 admin/admin888，可用环境变量 AUTH_USERNAME / AUTH_PASSWORD 覆盖。${reset}"
       exit 0
       ;;
     *)
@@ -505,9 +505,9 @@ fi
 chmod 700 "${DATA_DIR}"
 ok "数据目录 ${gl_lan}${DATA_DIR}${reset}、下载目录 ${gl_lan}${DOWNLOAD_DIR}${reset} 已就绪"
 
-# 4) 登录凭据（默认 admin/admin123，可用环境变量覆盖）
+# 4) 登录凭据（默认 admin/admin888，可用环境变量覆盖）
 AUTH_USERNAME="${AUTH_USERNAME:-admin}"
-AUTH_PASSWORD="${AUTH_PASSWORD:-admin123}"
+AUTH_PASSWORD="${AUTH_PASSWORD:-admin888}"
 
 # 5) 安装记录
 mkdir -p "$(dirname "${CONFIG_FILE}")"

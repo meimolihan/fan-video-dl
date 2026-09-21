@@ -114,11 +114,11 @@ def init_db():
     c.execute('SELECT COUNT(*) FROM users')
     if c.fetchone()[0] == 0:
         default_user = os.environ.get('AUTH_USERNAME', 'admin')
-        default_pass = os.environ.get('AUTH_PASSWORD', 'admin123')
+        default_pass = os.environ.get('AUTH_PASSWORD', 'admin888')
         create_user(default_user, default_pass)
         logging.getLogger(__name__).warning(
             f"已创建默认用户 '{default_user}'。"
-            + ("请立即修改默认密码 'admin123'!" if default_pass == 'admin123' else "")
+            + ("请立即修改默认密码 'admin888'!" if default_pass == 'admin888' else "")
         )
     conn.close()
 

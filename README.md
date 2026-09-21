@@ -39,7 +39,7 @@ docker-compose up -d
 
 访问 `http://localhost:5200`
 
-默认账号 `admin` / `admin123`
+默认账号 `admin` / `admin888`
 
 > ⚠️ **请务必在登录后修改默认密码**，或在部署时通过 `AUTH_USERNAME` / `AUTH_PASSWORD` 环境变量覆盖。
 
@@ -74,7 +74,7 @@ bash -c "$(curl -sSL https://raw.githubusercontent.com/meimolihan/fan-video-dl/m
 
 升级方式：再次执行同样的 install.sh 命令（数据自动保留）。命令行工具：`fan-video-dl help`。
 
-登录访问 `http://<服务器IP>:5200`，默认账号 `admin` / `admin123`（登录后请立即修改）。
+登录访问 `http://<服务器IP>:5200`，默认账号 `admin` / `admin888`（登录后请立即修改）。
 
 ### 本地运行
 
@@ -118,7 +118,7 @@ python app.py
 |---|---|---|
 | `PORT` | 5200 | Web 服务端口 |
 | `AUTH_USERNAME` | admin | 登录用户名 |
-| `AUTH_PASSWORD` | admin123 | 登录密码 |
+| `AUTH_PASSWORD` | admin888 | 登录密码 |
 | `SECRET_KEY` | 自动生成并持久化 | Flask Session 密钥（重启后保持登录） |
 
 ## 📂 目录结构

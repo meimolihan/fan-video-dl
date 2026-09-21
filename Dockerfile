@@ -35,7 +35,7 @@ EXPOSE 5200
 
 # Default auth (override with env vars) — 生产环境务必修改
 ENV AUTH_USERNAME=admin
-ENV AUTH_PASSWORD=admin123
+ENV AUTH_PASSWORD=admin888
 
 # Single worker + multiple threads: tasks dict lives in-process memory,
 # must be shared across all requests (download threads + polling)

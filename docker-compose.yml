@@ -11,7 +11,7 @@ services:
     environment:
       - PORT=5200
       - AUTH_USERNAME=admin
-      - AUTH_PASSWORD=admin123
+      - AUTH_PASSWORD=admin888
       # 生产环境请务必修改上面的默认账号密码!
       # 建议同时设置 SECRET_KEY=<随机字符>, 否则程序会自动生成并持久化到 data/secret_key
     tmpfs:
