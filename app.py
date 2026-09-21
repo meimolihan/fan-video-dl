@@ -7,6 +7,7 @@ fan-video-dl - Web UI for yt-dlp
 
 import os
 import sys
+import json
 import logging
 import re
 import uuid
@@ -52,6 +53,9 @@ DOWNLOAD_DIR = BASE_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 DB_PATH = BASE_DIR / "data" / "users.db"
 DB_PATH.parent.mkdir(exist_ok=True)
+
+# 代理配置持久化到 data/proxy_config.json, 由 douyin_downloader 托管读写
+douyin_downloader.set_proxy_file(str(DB_PATH.parent / 'proxy_config.json'))
 
 
 def _load_or_create_secret_key():
@@ -281,7 +285,8 @@ def extract_real_video_url(url):
     """从网页中智能提取真实视频地址(m3u8/mp4), 支持 MacCMS 等播放器"""
     try:
         from curl_cffi import requests as cffi_requests
-        r = cffi_requests.get(url, impersonate='chrome', timeout=30)
+        r = cffi_requests.get(url, impersonate='chrome', timeout=30,
+                              proxies=douyin_downloader.get_proxies())
         if r.status_code != 200:
             return None
         html = r.text
@@ -294,7 +299,8 @@ def extract_real_video_url(url):
                 iframe_url = urljoin(url, iframe_src)
                 try:
                     r2 = cffi_requests.get(iframe_url, impersonate='chrome', timeout=20,
-                                           headers={'Referer': url})
+                                           headers={'Referer': url},
+                                           proxies=douyin_downloader.get_proxies())
                     if r2.status_code == 200:
                         # 在iframe页面里找带token的m3u8 (优先返回有token的)
                         token_m3u8 = re.findall(r'["\']([^"\' ]*m3u8[^"\' ]*token=[^"\' ]*)["\']', r2.text)
@@ -447,6 +453,11 @@ def build_ytdlp_cmd(url, options, output_template=None):
     concurrent = int(options.get('concurrent', 10))
     cmd.extend(['--concurrent-fragments', str(concurrent)])
     cmd.extend(['--throttled-rate', '100K'])
+
+    # 代理: UI 配置了代理时传递给 yt-dlp
+    proxy_cfg = douyin_downloader.get_proxy_config()
+    if proxy_cfg['enabled'] and proxy_cfg['url']:
+        cmd.extend(['--proxy', proxy_cfg['url']])
 
     cmd.append(url)
     return cmd
@@ -630,7 +641,8 @@ def run_download(task_id, url, options):
                     base_url = f"{parsed.scheme}://{parsed.netloc}{base_path}"
 
                     r = cffi_req.get(pre_extracted_url, impersonate='chrome', timeout=15,
-                                     headers={'Referer': referer})
+                                     headers={'Referer': referer},
+                                     proxies=douyin_downloader.get_proxies())
                     if r.status_code == 200:
                         master_content = r.text
 
@@ -643,7 +655,8 @@ def run_download(task_id, url, options):
                                 sub_url = f"{base_url}/{line}?{token_qs}"
                                 # 下载子playlist, 把ts路径也改成带token的
                                 r_sub = cffi_req.get(sub_url, impersonate='chrome', timeout=15,
-                                                     headers={'Referer': referer})
+                                                      headers={'Referer': referer},
+                                                      proxies=douyin_downloader.get_proxies())
                                 if r_sub.status_code == 200:
                                     sub_base = sub_url.rsplit('/', 1)[0]
                                     sub_lines = []
@@ -1016,6 +1029,30 @@ def change_un():
         session['username'] = new_username
         return jsonify({'status': 'ok', 'username': new_username})
     return jsonify({'error': '密码错误或用户名已存在'}), 400
+
+
+@app.route('/api/proxy-config', methods=['GET'])
+@login_required
+def proxy_config_get():
+    """获取当前代理配置"""
+    return jsonify(douyin_downloader.get_proxy_config())
+
+
+@app.route('/api/proxy-config', methods=['POST'])
+@login_required
+def proxy_config_post():
+    """保存代理配置, 立即对后续下载生效 (无需重启)"""
+    data = request.get_json(silent=True) or {}
+    url = str(data.get('url') or '').strip()
+    enabled = bool(data.get('enabled'))
+
+    if enabled and not re.match(r'^(https?|socks4|socks4a|socks5|socks5h)://', url, re.I):
+        return jsonify({'error': '代理地址需以 http://、https://、socks4:// 或 socks5:// 开头'}), 400
+
+    cfg = douyin_downloader.save_proxy_config(enabled, url)
+    logging.getLogger(__name__).info(
+        f"代理配置已更新: {'启用 ' + cfg['url'] if cfg['enabled'] else '关闭'}")
+    return jsonify({'status': 'ok', **cfg})
 
 
 @app.route('/api/douyin/info', methods=['POST'])

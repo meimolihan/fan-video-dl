@@ -24,6 +24,65 @@ DOUYIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' \
 _ttwid_cache = {'value': None, 'ts': 0.0}
 TTWID_TTL = 7 * 24 * 3600
 
+# ===================== 代理配置 =====================
+# 由 app.py 启动时注入配置文件路径, 对所有 curl_cffi 请求统一生效,
+# 同时供 app.py 的 yt-dlp 命令构建使用 (install.sh 只拷贝指定 .py 文件, 故放本模块)
+_proxy_file = None
+_proxy_cache = {'data': None, 'ts': 0.0}
+PROXY_TTL = 60
+
+
+def set_proxy_file(path):
+    global _proxy_file
+    _proxy_file = path
+
+
+def load_proxy_config():
+    """读取持久化的代理配置, 返回 {'enabled': bool, 'url': str}"""
+    if not _proxy_file or not os.path.isfile(_proxy_file):
+        return {'enabled': False, 'url': ''}
+    try:
+        with open(_proxy_file, encoding='utf-8') as f:
+            data = json.load(f)
+        return {'enabled': bool(data.get('enabled')), 'url': str(data.get('url') or '').strip()}
+    except Exception as e:
+        logger.debug(f"读取代理配置失败: {e}")
+        return {'enabled': False, 'url': ''}
+
+
+def get_proxy_config():
+    """带缓存的代理配置读取, 避免每个请求都读磁盘"""
+    now = time.time()
+    if _proxy_file and _proxy_cache['data'] and now - _proxy_cache['ts'] < PROXY_TTL:
+        return _proxy_cache['data']
+    cfg = load_proxy_config()
+    _proxy_cache['data'] = cfg
+    _proxy_cache['ts'] = now
+    return cfg
+
+
+def save_proxy_config(enabled, url):
+    """写入代理配置并失效缓存, 返回规范化后的配置 (url 为空无论如何视为未启用)"""
+    cfg = {'enabled': bool(enabled) and bool(url), 'url': str(url or '').strip()}
+    if _proxy_file:
+        try:
+            os.makedirs(os.path.dirname(_proxy_file), exist_ok=True)
+            with open(_proxy_file, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"保存代理配置失败: {e}")
+    _proxy_cache['data'] = None
+    _proxy_cache['ts'] = 0.0
+    return cfg
+
+
+def get_proxies():
+    """返回 curl_cffi/requests 可用的 proxies 参数; 未启用代理时返回 None"""
+    cfg = get_proxy_config()
+    if cfg['enabled'] and cfg['url']:
+        return {'http': cfg['url'], 'https': cfg['url']}
+    return None
+
 
 def _refresh_ttwid():
     """向字节 union 服务注册获取新 ttwid (匿名标识, 无需登录, 与 stream-bridge 方案一致)"""
@@ -42,6 +101,7 @@ def _refresh_ttwid():
             },
             impersonate='chrome',
             timeout=10,
+            proxies=get_proxies(),
         )
         if r.status_code == 200 and 'ttwid' in r.cookies:
             return 'ttwid=' + str(r.cookies['ttwid'])
@@ -139,6 +199,7 @@ def get_video_info(aweme_id):
                 },
                 impersonate='chrome',
                 timeout=15,
+                proxies=get_proxies(),
             )
 
             if not r.text or len(r.text) < 50:
@@ -253,6 +314,7 @@ def download_douyin_video(url, output_dir, filename=None):
             impersonate='chrome',
             timeout=300,
             stream=True,
+            proxies=get_proxies(),
         )
 
         if r.status_code != 200:
@@ -296,7 +358,8 @@ def resolve_short_url(url):
         return url
     try:
         from curl_cffi import requests
-        r = requests.get(url, impersonate='chrome', timeout=10, allow_redirects=True)
+        r = requests.get(url, impersonate='chrome', timeout=10, allow_redirects=True,
+                         proxies=get_proxies())
         return r.url
     except:
         return url
