@@ -1,17 +1,17 @@
-修复: 播放/下载/删除改 query 参数路由, 规避文件名特殊字符编码歧义
+修复: AV1/VP9 视频输出转码为 H.264, 解决浏览器无法播放
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.4
+docker pull mobufan/fan-video-dl:v1.1.5
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.4
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.5
 ```
 
 ## 一键脚本安装（systemd）
