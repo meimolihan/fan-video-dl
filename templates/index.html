@@ -952,7 +952,7 @@ async function fetchTasks() {
         } else if (t.status === 'completed') {
             stats = `✅ ${t.file_size || ''}  ${t.elapsed ? '耗时 ' + t.elapsed : ''}`;
         } else if (t.status === 'failed') {
-            stats = `❌ ${t.error || '下载失败'}`;
+            stats = `❌ ${esc(t.error || '下载失败')}`;
         } else if (t.status === 'merging') {
             stats = '🔄 正在合并...';
         } else if (t.status === 'paused') {
@@ -980,7 +980,7 @@ async function fetchTasks() {
         } else if (t.status === 'failed' || t.status === 'cancelled') {
             actions = `<button class="task-btn" onclick="retryTask('${t.id}')" style="color:var(--success);border-color:var(--success)">🔄 重试</button><button class="task-btn danger" onclick="deleteTask('${t.id}')">删除</button>`;
         }
-        return `<div class="task-item"><div class="task-header"><div class="task-url" title="${t.url}">${t.url}</div><div class="task-actions">${actions}</div></div><div class="progress-container"><div class="progress-bar"><div class="progress-fill ${t.status}" style="width:${pct}%"></div><span class="progress-text">${pct.toFixed(1)}%</span></div><span class="progress-percent">${pct.toFixed(1)}%</span></div><div class="task-info"><span class="status-badge status-${statusClass}">${statusLabel}</span><span class="task-stats">${stats}</span></div></div>`;
+        return `<div class="task-item"><div class="task-header"><div class="task-url" title="${esc(t.url)}">${esc(t.url)}</div><div class="task-actions">${actions}</div></div><div class="progress-container"><div class="progress-bar"><div class="progress-fill ${t.status}" style="width:${pct}%"></div><span class="progress-text">${pct.toFixed(1)}%</span></div><span class="progress-percent">${pct.toFixed(1)}%</span></div><div class="task-info"><span class="status-badge status-${statusClass}">${statusLabel}</span><span class="task-stats">${stats}</span></div></div>`;
     }).join('');
     updateStats(tasks.length, null);
     // Auto-download completed tasks
@@ -1050,7 +1050,7 @@ async function fetchFiles() {
         const icon = isVideo ? '🎬' : isAudio ? '🎵' : '📄';
         const date = new Date(f.modified * 1000);
         const dateStr = `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}`;
-        return `<div class="file-item"><div class="file-info"><div class="file-name">${icon} ${f.name}</div><div class="file-meta">${f.size}  ·  ${dateStr}</div></div><div class="file-actions">${(isVideo||isAudio) ? `<button class="btn-icon" onclick="playFile('${encodeURIComponent(f.name)}')" title="播放"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>` : ''}<button class="btn-icon" onclick="downloadFile('${encodeURIComponent(f.name)}')" title="下载到本地"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></button><button class="btn-icon danger" onclick="deleteFile('${encodeURIComponent(f.name)}')" title="删除"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button></div></div>`;
+        return `<div class="file-item"><div class="file-info"><div class="file-name">${icon} ${esc(f.name)}</div><div class="file-meta">${f.size}  ·  ${dateStr}</div></div><div class="file-actions">${(isVideo||isAudio) ? `<button class="btn-icon" onclick="playFile('${encodeURIComponent(f.name)}')" title="播放"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>` : ''}<button class="btn-icon" onclick="downloadFile('${encodeURIComponent(f.name)}')" title="下载到本地"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></button><button class="btn-icon danger" onclick="deleteFile('${encodeURIComponent(f.name)}')" title="删除"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button></div></div>`;
     }).join('');
     document.getElementById('fileCount').textContent = files.length;
     const total = files.reduce((sum, f) => sum + (f.size_bytes || 0), 0);
@@ -1063,6 +1063,9 @@ function formatSize(bytes) {
     let i = 0;
     while (bytes >= 1024 && i < units.length-1) { bytes /= 1024; i++; }
     return bytes.toFixed(1) + ' ' + units[i];
+}
+function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function downloadFile(name) { window.location.href = `/api/file/${name}`; }
 function deleteFile(name) {

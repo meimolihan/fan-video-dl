@@ -8,9 +8,9 @@ fan-video-dl - Web UI for yt-dlp
 import os
 import logging
 import re
-import json
 import uuid
 import hashlib
+import hmac
 import secrets
 import sqlite3
 import threading
@@ -41,19 +41,44 @@ def _get_version():
 
 VERSION = _get_version()
 
-app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-app.permanent_session_lifetime = 7 * 24 * 3600  # 7 days
-
-@app.context_processor
-def inject_version():
-    return {'version': VERSION}
+# ─── 日志 ───
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 DB_PATH = BASE_DIR / "data" / "users.db"
 DB_PATH.parent.mkdir(exist_ok=True)
+
+
+def _load_or_create_secret_key():
+    """SECRET_KEY: 优先环境变量(忽略已知占位值); 否则持久化到 data/secret_key, 避免重启后 session 全部失效"""
+    env_key = os.environ.get('SECRET_KEY')
+    if env_key and env_key != 'change-me-to-a-random-string':
+        return env_key
+    key_file = DB_PATH.parent / 'secret_key'
+    if key_file.exists():
+        key = key_file.read_text(encoding='utf-8').strip()
+        if key:
+            return key
+    key = secrets.token_hex(32)
+    try:
+        key_file.write_text(key, encoding='utf-8')
+        os.chmod(key_file, 0o600)
+        logging.getLogger(__name__).info(f"已生成持久化 SECRET_KEY: {key_file}")
+    except OSError as e:
+        logging.getLogger(__name__).warning(f"无法持久化 SECRET_KEY: {e}")
+    return key
+
+
+app = Flask(__name__)
+app.secret_key = _load_or_create_secret_key()
+app.permanent_session_lifetime = 7 * 24 * 3600  # 7 days
+
+@app.context_processor
+def inject_version():
+    return {'version': VERSION}
 
 # 存储下载任务状态
 tasks = {}
@@ -85,13 +110,28 @@ def init_db():
         default_user = os.environ.get('AUTH_USERNAME', 'admin')
         default_pass = os.environ.get('AUTH_PASSWORD', 'admin123')
         create_user(default_user, default_pass)
+        logging.getLogger(__name__).warning(
+            f"已创建默认用户 '{default_user}'。"
+            + ("请立即修改默认密码 'admin123'!" if default_pass == 'admin123' else "")
+        )
     conn.close()
+
+
+PBKDF2_ITERATIONS = 200000
+
+
+def _hash_password(password, salt=None, iterations=PBKDF2_ITERATIONS):
+    """生成 PBKDF2 密码哈希, 格式: pbkdf2$<迭代次数>$<盐>$<hex>"""
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        'sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations).hex()
+    return f'pbkdf2${iterations}${salt}${digest}'
 
 
 def create_user(username, password):
     """创建用户"""
     salt = secrets.token_hex(16)
-    password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+    password_hash = _hash_password(password, salt)
     conn = sqlite3.connect(str(DB_PATH))
     c = conn.cursor()
     try:
@@ -106,7 +146,7 @@ def create_user(username, password):
 
 
 def verify_user(username, password):
-    """验证用户名密码"""
+    """验证用户名密码 (兼容旧版 sha256 哈希, 成功登录后自动升级为 PBKDF2)"""
     conn = sqlite3.connect(str(DB_PATH))
     c = conn.cursor()
     c.execute('SELECT password_hash, salt FROM users WHERE username = ?', (username,))
@@ -114,9 +154,33 @@ def verify_user(username, password):
     conn.close()
     if not row:
         return False
-    stored_hash, salt = row
-    password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
-    return password_hash == stored_hash
+    stored_hash, legacy_salt = row
+
+    # 新版 PBKDF2 格式: pbkdf2$<iterations>$<salt>$<hex>
+    if stored_hash.startswith('pbkdf2$'):
+        try:
+            _, iter_str, pb_salt, expected = stored_hash.split('$', 3)
+            iterations = int(iter_str)
+        except (ValueError, TypeError):
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            'sha256', password.encode('utf-8'), pb_salt.encode('utf-8'), iterations).hex()
+        return hmac.compare_digest(actual, expected)
+
+    # 旧版格式: sha256(salt + password)
+    actual = hashlib.sha256((password + legacy_salt).encode()).hexdigest()
+    if hmac.compare_digest(actual, stored_hash):
+        try:  # 登录成功, 自动升级存储格式
+            new_hash = _hash_password(password, legacy_salt)
+            conn2 = sqlite3.connect(str(DB_PATH))
+            conn2.execute('UPDATE users SET password_hash=? WHERE username=?',
+                          (new_hash, username))
+            conn2.commit()
+            conn2.close()
+        except sqlite3.Error:
+            pass
+        return True
+    return False
 
 
 def change_password(username, old_password, new_password):
@@ -124,7 +188,7 @@ def change_password(username, old_password, new_password):
     if not verify_user(username, old_password):
         return False
     salt = secrets.token_hex(16)
-    password_hash = hashlib.sha256((new_password + salt).encode()).hexdigest()
+    password_hash = _hash_password(new_password, salt)
     conn = sqlite3.connect(str(DB_PATH))
     c = conn.cursor()
     c.execute('UPDATE users SET password_hash = ?, salt = ? WHERE username = ?',
@@ -209,58 +273,6 @@ def get_file_size_str(size_bytes):
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
     return f"{size_bytes:.1f} PB"
-
-
-def parse_ytdlp_progress(line):
-    """解析 yt-dlp 的进度输出行"""
-    result = {}
-    # [download] 12.34% of ~1.23GiB at 1.50MiB/s ETA 03:20 (frag 250/2084)
-    m = re.search(
-        r'\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(\w+)\s+at\s+([\d.]+)(\w+)/s\s+ETA\s+([\d:]+)(?:\s+\(frag\s+(\d+)/(\d+)\))?',
-        line
-    )
-    if m:
-        result['percent'] = float(m.group(1))
-        result['total_size'] = f"{m.group(2)}{m.group(3)}"
-        result['speed'] = f"{m.group(4)}{m.group(5)}/s"
-        result['eta'] = m.group(6)
-        if m.group(7):
-            result['frag_current'] = int(m.group(7))
-            result['frag_total'] = int(m.group(8))
-        return result
-
-    # [download] 100% of ~1.23GiB in 05:30 at 4.50MiB/s
-    m = re.search(
-        r'\[download\]\s+100%\s+of\s+~?\s*([\d.]+)(\w+)\s+in\s+([\d:]+)\s+at\s+([\d.]+)(\w+)/s',
-        line
-    )
-    if m:
-        result['percent'] = 100.0
-        result['total_size'] = f"{m.group(1)}{m.group(2)}"
-        result['speed'] = f"{m.group(4)}{m.group(5)}/s"
-        result['eta'] = '00:00'
-        result['status'] = 'merging'
-        return result
-
-    # [Merger] Merging formats into ... / [ExtractAudio] Converting ...
-    if '[Merger]' in line or '[ffmpeg]' in line or '[ExtractAudio]' in line:
-        result['status'] = 'merging'
-        result['percent'] = 100.0
-        return result
-
-    # [download] Destination: ...
-    m = re.search(r'\[download\]\s+Destination:\s+(.+)', line)
-    if m:
-        result['status'] = 'starting'
-        result['filename'] = m.group(1).strip()
-        return result
-
-    # [info] Downloading 1 format(s)
-    if '[info]' in line:
-        result['status'] = 'preparing'
-        return result
-
-    return None
 
 
 def extract_real_video_url(url):
@@ -447,7 +459,7 @@ def run_douyin_download(task_id, url, options):
             headers={
                 'User-Agent': douyin_downloader.DOUYIN_UA,
                 'Referer': 'https://www.douyin.com/',
-                'Cookie': douyin_downloader.DOUYIN_COOKIE,
+                'Cookie': douyin_downloader.get_douyin_cookie(),
             },
             impersonate='chrome',
             timeout=300,
@@ -1254,110 +1266,6 @@ def delete_file(filename):
         return jsonify({'error': '文件不存在'}), 404
     filepath.unlink()
     return jsonify({'status': 'deleted'})
-
-
-
-
-@app.route('/api/stream-download', methods=['POST'])
-@login_required
-def stream_download():
-    """流式直传: yt-dlp 输出到 stdout, 直接转发给浏览器, 不存服务器硬盘
-    支持 JSON 和表单 POST。表单方式触发浏览器原生下载条。"""
-    from flask import Response
-
-    if request.is_json:
-        data = request.json or {}
-    else:
-        data = request.form.to_dict()
-
-    url = data.get('url', '').strip()
-    if not url:
-        return jsonify({'error': '请输入 URL'}), 400
-    if not re.match(r'https?://', url):
-        return jsonify({'error': 'URL 格式错误'}), 400
-
-    fmt = data.get('format', 'best')
-    cmd = [
-        'yt-dlp',
-        '--no-check-certificates',
-        '--extractor-args', 'generic:impersonate',
-        '--concurrent-fragments', str(int(data.get('concurrent', 10))),
-        '--throttled-rate', '100K',
-        '--retries', '10',
-        '--fragment-retries', '10',
-        '-o', '-',
-        '--no-part',
-    ]
-    if fmt == 'audio':
-        cmd.extend(['-x', '--audio-format', 'mp3', '--audio-quality', '0'])
-        ext = 'mp3'
-    elif fmt == '720p':
-        cmd.extend(['-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]/best'])
-        ext = 'mp4'
-    elif fmt == '1080p':
-        cmd.extend(['-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'])
-        ext = 'mp4'
-    else:
-        cmd.extend(['-f', 'bestvideo+bestaudio/best'])
-        ext = 'mp4'
-    cmd.append(url)
-
-    # 先用 yt-dlp 获取标题和大小
-    title = 'video'
-    content_length = None
-    try:
-        info_proc = subprocess.run(
-            ['yt-dlp', '--no-check-certificates', '--extractor-args', 'generic:impersonate', '-J', url],
-            capture_output=True, text=True, timeout=60, cwd=str(DOWNLOAD_DIR)
-        )
-        if info_proc.stdout:
-            info = json.loads(info_proc.stdout)
-            title = sanitize_filename(info.get('title', 'video') or 'video')
-            if info.get('filesize'):
-                content_length = int(info['filesize'])
-            elif info.get('filesize_approx'):
-                content_length = int(info['filesize_approx'])
-            else:
-                total = 0
-                for f in info.get('requested_formats', []):
-                    total += f.get('filesize') or f.get('filesize_approx') or 0
-                if total > 0:
-                    content_length = total
-    except Exception:
-        pass
-
-    download_name = f"{title}.{ext}"
-    from urllib.parse import quote
-    encoded_name = quote(download_name)
-
-    from urllib.parse import quote
-    encoded_name = quote(download_name)
-
-    # 下载到临时文件再发送: send_file 会设置 Content-Length, Chrome 显示进度条
-    import tempfile
-    tmp_path = tempfile.mktemp(suffix=f'.{ext}', dir='/tmp')
-    cmd_dl = [c for c in cmd if c != url]
-    cmd_dl.extend(['-o', tmp_path])
-    cmd_dl.append(url)
-    try:
-        subprocess.run(cmd_dl, capture_output=True, timeout=600, cwd=str(DOWNLOAD_DIR))
-        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-            resp = send_file(
-                tmp_path,
-                as_attachment=True,
-                download_name=download_name,
-                mimetype='application/octet-stream',
-            )
-            # 发送后删除临时文件
-            import atexit
-            atexit.register(lambda: os.path.exists(tmp_path) and os.unlink(tmp_path))
-            return resp
-        else:
-            return jsonify({'error': '下载失败: 文件为空'}), 500
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': '下载超时'}), 500
-    except Exception as e:
-        return jsonify({'error': f'下载失败: {str(e)}'}), 500
 
 
 @app.route('/api/clear-cache', methods=['POST'])

@@ -123,13 +123,15 @@ def has_cmd(name):
 
 
 def run(name, args, quiet=True):
+    """执行命令并返回是否成功 (以退出码为准)"""
     if not has_cmd(name):
         return False
     try:
-        subprocess.run([name, *args],
-                       stdout=subprocess.DEVNULL if quiet else None,
-                       stderr=subprocess.DEVNULL if quiet else None)
-        return True
+        proc = subprocess.run([name, *args],
+                              stdout=subprocess.DEVNULL if quiet else None,
+                              stderr=subprocess.DEVNULL if quiet else None,
+                              timeout=60)
+        return proc.returncode == 0
     except Exception:
         return False
 
@@ -397,8 +399,11 @@ def cmd_status():
 
     section("服务方式")
     kv("运行方式", ptype)
-    active = has_cmd("systemctl") and run("systemctl", ["is-active", "--quiet", SERVICE_NAME])
-    kv("服务状态", "运行中" if active else "运行中（非 systemd）")
+    if ptype.startswith("systemd"):
+        active = run("systemctl", ["is-active", "--quiet", SERVICE_NAME])
+        kv("服务状态", "运行中" if active else "服务异常（is-active 非 active）")
+    else:
+        kv("服务状态", f"运行中（{ptype}）")
 
     section("进程信息")
     kv("进程 PID", pid)

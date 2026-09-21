@@ -33,7 +33,7 @@ VOLUME /app/data
 
 EXPOSE 5200
 
-# Default auth (override with env vars)
+# Default auth (override with env vars) — 生产环境务必修改
 ENV AUTH_USERNAME=admin
 ENV AUTH_PASSWORD=admin123
 

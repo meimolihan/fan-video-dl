@@ -1,4 +1,4 @@
-# 🎬 ywsj Video Downloader
+# 🎬 fan-video-dl
 
 基于 yt-dlp 的 Web 视频下载器，支持 TLS 指纹伪装绕过基础 Cloudflare 拦截、多线程下载、实时进度显示、抖音无水印、明暗主题切换。
 
@@ -30,14 +30,16 @@
 ### Docker 部署（推荐）
 
 ```bash
-git clone https://github.com/yyzq-cf/video-downloader.git
-cd video-downloader
+git clone https://github.com/meimolihan/fan-video-dl.git
+cd fan-video-dl
 docker-compose up -d
 ```
 
 访问 `http://localhost:5200`
 
 默认账号 `admin` / `admin123`
+
+> ⚠️ **请务必在登录后修改默认密码**，或在部署时通过 `AUTH_USERNAME` / `AUTH_PASSWORD` 环境变量覆盖。
 
 ### 本地运行
 
@@ -82,18 +84,21 @@ python app.py
 | `PORT` | 5200 | Web 服务端口 |
 | `AUTH_USERNAME` | admin | 登录用户名 |
 | `AUTH_PASSWORD` | admin123 | 登录密码 |
-| `SECRET_KEY` | 随机生成 | Flask Session 密钥 |
+| `SECRET_KEY` | 自动生成并持久化 | Flask Session 密钥（重启后保持登录） |
 
 ## 📂 目录结构
 
 ```
-video-downloader/
+fan-video-dl/
 ├── app.py                 # Flask 后端
-├── douyin_downloader.py   # 抖音无水印下载模块
+├── douyin_downloader.py   # 抖音无水印下载模块（含 ttwid 自动刷新）
+├── cli.py                 # 内置 CLI 管理命令 (status/credentials/uninstall 等)
 ├── templates/
 │   └── index.html         # Web UI（明暗主题）
+├── scripts/               # 运维脚本 (install/uninstall/backup/recover/build-and-push)
+├── version.txt            # 版本号（发版脚本维护）
 ├── downloads/             # 下载文件目录
-├── data/                  # 用户数据库
+├── data/                  # 用户数据库 + 持久化 SECRET_KEY
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
@@ -103,15 +108,15 @@ video-downloader/
 
 ## 📋 版本与更新日志
 
-本项目采用**日期版本号**格式：`vYYYYMMDD-N`（北京时间 UTC+8）
+本项目采用**语义化版本号**格式：`vX.Y.Z`（如 `v1.0.0`）
 
-- 每次 push 到 master 分支自动生成新版本号（同一天多次 push 自动递增 N）
-- CI 构建时将版本号注入 Docker 镜像环境变量，Web 界面显示该版本
-- GitHub Release 自动记录更新日志（基于 commit messages）
-- Docker Hub 同步推送对应版本 tag + `latest`
+- 发版脚本 `scripts/build-and-push.sh vX.Y.Z` 自动更新 `version.txt`、提交并推送 tag
+- 推送 tag 后 GitHub Actions（`.github/workflows/release.yml`）自动完成：构建并推送 Docker 镜像（Docker Hub + GHCR）、创建 GitHub Release、同步 CNB 镜像仓库
+- 发版备注可写入 `RELEASE_NOTES.md`（或发版时用 `-m` 传入）
+- Web 界面版本号取自 `version.txt` / CI 注入的 `APP_VERSION`
 - **容器重启不会改变版本号**，只有代码更新才会
 
-查看所有版本：[Releases](https://github.com/yyzq-cf/video-downloader/releases)
+查看所有版本：[Releases](https://github.com/meimolihan/fan-video-dl/releases)
 
 ### 历史更新
 
@@ -134,7 +139,7 @@ video-downloader/
 - 对于受版权保护的内容，应事先获得版权方授权
 - 开发者不对使用者的下载行为及服务器上存储的内容承担任何法律责任
 
-如版权方认为本工具涉及侵权，请通过 [Issues](https://github.com/yyzq-cf/video-downloader/issues) 联系。
+如版权方认为本工具涉及侵权，请通过 [Issues](https://github.com/meimolihan/fan-video-dl/issues) 联系。
 
 ## License
 

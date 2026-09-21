@@ -140,10 +140,13 @@ jobs:
           ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', github.event.inputs.tag) }}
 
       - name: Sync to CNB Repository
-        if: ${{ env.CNB_TOKEN != '' }}
         env:
           CNB_TOKEN: ${{ secrets.CNB_ACCESS_TOKEN }}
         run: |
+          if [ -z "$CNB_TOKEN" ] || [ "$CNB_TOKEN" = "" ]; then
+            echo "::warning::CNB_ACCESS_TOKEN 未配置，跳过同步到 CNB 镜像仓库"
+            exit 0
+          fi
           docker run --rm \
             -v ${{ github.workspace }}:${{ github.workspace }} \
             -w ${{ github.workspace }} \
@@ -154,9 +157,3 @@ jobs:
             -e PLUGIN_FORCE="true" \
             -e PLUGIN_PUSH_TAGS="true" \
             tencentcom/git-sync
-
-      - name: Skip CNB sync
-        if: ${{ env.CNB_TOKEN == '' }}
-        env:
-          CNB_TOKEN: ${{ secrets.CNB_ACCESS_TOKEN }}
-        run: echo "::warning::CNB_ACCESS_TOKEN 未配置，跳过同步到 CNB 镜像仓库"

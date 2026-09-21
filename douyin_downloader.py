@@ -6,16 +6,65 @@
 import re
 import json
 import os
+import time
 import subprocess
 import logging
 
 logger = logging.getLogger(__name__)
 
-# 抖音 web cookie (ttwid 匿名标识, 无需登录, 与 stream-bridge 共用)
-DOUYIN_COOKIE = 'ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d'
+# 兜底 ttwid cookie：仅当在线自动刷新失败时使用（正常启动会瞬时拉取最新 ttwid）
+# 可用环境变量 DOUYIN_COOKIE 手动指定 (形如 'ttwid=xxx')
+DOUYIN_COOKIE = os.environ.get('DOUYIN_COOKIE') or \
+    'ttwid=1%7ChiSL7rCe30DfLdEHmmwy5dbV-bKNy7lFJfO6SXtBa3c%7C1789964990%7Cb11fb2f1965e00a8d35ce5d121dbf08ddc4a31e4f2d0a57585fefebe6c67cb1b'
 
 DOUYIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' \
              '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+
+# ttwid 缓存: 启动/每 7 天从字节 union 服务刷新一次, 避免静态 cookie 过期导致接口失效
+_ttwid_cache = {'value': None, 'ts': 0.0}
+TTWID_TTL = 7 * 24 * 3600
+
+
+def _refresh_ttwid():
+    """向字节 union 服务注册获取新 ttwid (匿名标识, 无需登录, 与 stream-bridge 方案一致)"""
+    try:
+        from curl_cffi import requests
+        r = requests.post(
+            'https://ttwid.bytedance.com/ttwid/union/register/',
+            json={
+                'region': 'cn',
+                'aid': 1768,
+                'needFid': False,
+                'service': 'www.douyin.com',
+                'migrate_info': {'ticket': '', 'source': 'node'},
+                'cbUrlProtocol': 'https',
+                'union': True,
+            },
+            impersonate='chrome',
+            timeout=10,
+        )
+        if r.status_code == 200 and 'ttwid' in r.cookies:
+            return 'ttwid=' + str(r.cookies['ttwid'])
+    except Exception as e:
+        logger.debug(f"ttwid 刷新失败: {e}")
+    return None
+
+
+def get_douyin_cookie():
+    """获取当前可用的抖音 cookie (优先缓存, 定期刷新, 失败回退静态兜底值)"""
+    now = time.time()
+    if _ttwid_cache['value'] and now - _ttwid_cache['ts'] < TTWID_TTL:
+        return _ttwid_cache['value']
+    new = _refresh_ttwid()
+    if new:
+        _ttwid_cache['value'] = new
+        _ttwid_cache['ts'] = now
+        logger.info("已刷新抖音 ttwid cookie")
+        return new
+    if _ttwid_cache['value']:
+        return _ttwid_cache['value']
+    logger.warning("抖音 ttwid 刷新失败, 使用内置兜底 cookie")
+    return DOUYIN_COOKIE
 
 
 def is_douyin_url(url):
@@ -85,7 +134,7 @@ def get_video_info(aweme_id):
                 params=params,
                 headers={
                     'User-Agent': DOUYIN_UA,
-                    'Cookie': DOUYIN_COOKIE,
+                    'Cookie': get_douyin_cookie(),
                     'Referer': f'https://www.douyin.com/video/{aweme_id}',
                 },
                 impersonate='chrome',
@@ -199,7 +248,7 @@ def download_douyin_video(url, output_dir, filename=None):
             headers={
                 'User-Agent': DOUYIN_UA,
                 'Referer': 'https://www.douyin.com/',
-                'Cookie': DOUYIN_COOKIE,
+                'Cookie': get_douyin_cookie(),
             },
             impersonate='chrome',
             timeout=300,
