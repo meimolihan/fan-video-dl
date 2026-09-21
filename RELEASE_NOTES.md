@@ -1,17 +1,17 @@
-修复: YouTube 等站点下载得到 .webm 的问题, 有 ffmpeg 时自动转封装为 mp4
+安全: 默认密码由 admin123 改为 admin888
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.2
+docker pull mobufan/fan-video-dl:v1.1.3
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.2
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.3
 ```
 
 ## 一键脚本安装（systemd）
