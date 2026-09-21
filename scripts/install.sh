@@ -63,7 +63,6 @@ error() { printf "  %s %s\n" "${gl_hong}[错误]${reset}" "$1" >&2; exit 1; }
 APP_NAME="fan-video-dl"
 DEFAULT_PORT=5200
 APP_DIR="/var/lib/${APP_NAME}"
-DEFAULT_DATA_DIR="${APP_DIR}/data"
 CONFIG_FILE="/etc/${APP_NAME}.conf"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 CLI_BIN="/usr/local/bin/${APP_NAME}"
@@ -136,6 +135,7 @@ is_valid_src() {
 
 PORT=""
 DATA_DIR=""
+APP_DIR_EXPLICIT=0
 SRC_DIR=""
 SRC_DIR_EXPLICIT=0
 INSTALL_YES=0
@@ -153,9 +153,15 @@ while [ "$#" -gt 0 ]; do
       [ -n "${1:-}" ] || error "缺少 -p/--port 的值"
       PORT="$1"
       ;;
-    -d|--data)
+    -d|--install|--install-dir)
       shift
-      [ -n "${1:-}" ] || error "缺少 -d/--data 的值"
+      [ -n "${1:-}" ] || error "缺少 -d/--install 的值"
+      APP_DIR="$1"
+      APP_DIR_EXPLICIT=1
+      ;;
+    -D|--data)
+      shift
+      [ -n "${1:-}" ] || error "缺少 -D/--data 的值"
       DATA_DIR="$1"
       ;;
     -s|--src)
@@ -169,9 +175,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     -h|--help)
       printf "%s\n" "${gl_lan}fan-video-dl${reset} - ${gl_bai}Web 视频下载器(基于 yt-dlp) 安装脚本${reset}"
-      printf "  %-13s %s\n" "${gl_bai}用法:${reset}" "bash scripts/install.sh [-p PORT] [-d DATA_DIR] [-s SRC] [-y]"
+      printf "  %-13s %s\n" "${gl_bai}用法:${reset}" "bash scripts/install.sh [-p PORT] [-d APP_DIR] [-D DATA_DIR] [-s SRC] [-y]"
       printf "  %-13s %s\n" "${gl_bai}-p, --port${reset}" "监听端口（默认 ${gl_lan}${DEFAULT_PORT}${reset}）"
-      printf "  %-13s %s\n" "${gl_bai}-d, --data${reset}" "数据目录（默认 ${gl_lan}${DEFAULT_DATA_DIR}${reset}）"
+      printf "  %-13s %s\n" "${gl_bai}-d, --install${reset}" "程序安装目录（默认 ${gl_lan}${APP_DIR}${reset}）"
+      printf "  %-13s %s\n" "${gl_bai}-D, --data${reset}" "数据目录（默认 ${gl_lan}${APP_DIR}/data${reset}）"
       printf "  %-13s %s\n" "${gl_bai}-s, --src${reset}" "源码仓库路径（默认 ${gl_lan}${DEFAULT_SRC_DIR}${reset}）"
       printf "  %-13s %s\n" "${gl_bai}-y, --yes${reset}" "免交互，未指定项全部使用默认值"
       printf "  %-13s %s\n" "${gl_bai}-h, --help${reset}" "显示本帮助"
@@ -285,6 +292,7 @@ if [ -n "${PORT}" ]; then
   SILENT="y"
 fi
 [ -n "${DATA_DIR}" ] && SILENT="y"
+[ "${APP_DIR_EXPLICIT}" = "1" ] && SILENT="y"
 [ -n "${SRC_DIR}" ] && SILENT="y"
 [ ! -t 0 ] && SILENT="y"
 
@@ -311,18 +319,21 @@ else
 fi
 PORT="${PORT:-$DEFAULT_PORT}"
 
-# data dir prompt
+# ---- 配置参数: 程序安装目录（-d/--install 指定，默认 /var/lib/fan-video-dl）----
+printf "  %-14s %s\n" "${gl_lan}安装目录${reset}" "${gl_bai}${APP_DIR}${reset}$([ "${APP_DIR_EXPLICIT}" = "1" ] && echo "（参数指定）")"
+
+# data dir prompt (-D/--data 指定, 默认 ${APP_DIR}/data)
 if [ -z "${DATA_DIR}" ]; then
   if [ "$INSTALL_YES" = "1" ] || [ ! -t 0 ]; then
-    DATA_DIR="${DEFAULT_DATA_DIR}"
+    DATA_DIR="${APP_DIR}/data"
   else
-    read -r -p "${gl_bai}请输入数据目录${reset} ${gl_hui}[默认: ${DEFAULT_DATA_DIR}]${reset}: " DATA_DIR
-    DATA_DIR="${DATA_DIR:-$DEFAULT_DATA_DIR}"
+    read -r -p "${gl_bai}请输入数据目录${reset} ${gl_hui}[默认: ${APP_DIR}/data]${reset}: " DATA_DIR
+    DATA_DIR="${DATA_DIR:-${APP_DIR}/data}"
   fi
 else
   printf "  %-14s %s\n" "${gl_lan}数据目录${reset}" "${gl_bai}${DATA_DIR}${reset}（参数指定）"
 fi
-DATA_DIR="${DATA_DIR:-$DEFAULT_DATA_DIR}"
+DATA_DIR="${DATA_DIR:-${APP_DIR}/data}"
 
 # ---- 获取源码 ----
 if [ "${SRC_DIR_EXPLICIT}" != "1" ]; then
@@ -333,8 +344,9 @@ if [ "${SRC_DIR_EXPLICIT}" != "1" ]; then
 fi
 
 # 源码目录即安装目录(旧版安装残留)时: 显式 -s 直接报错; 否则改为远程拉取最新代码
-if [ -n "${SRC_DIR:-}" ]; then
-  if [ "$(cd "${SRC_DIR}" 2>/dev/null && pwd)" = "$(cd "${APP_DIR}" 2>/dev/null && pwd)" ]; then
+# 仅当两者目录都存在时才比较 (避免 cd 失败产生空串误判相等)
+if [ -n "${SRC_DIR:-}" ] && [ -d "${SRC_DIR}" ] && [ -d "${APP_DIR}" ]; then
+  if [ "$(cd "${SRC_DIR}" && pwd)" = "$(cd "${APP_DIR}" && pwd)" ]; then
     if [ "${SRC_DIR_EXPLICIT}" = "1" ]; then
       error "安装目录 ${APP_DIR} 是旧版程序目录, 不能作为 -s 源码; 请去掉 -s 让脚本自动拉取最新代码"
     fi
