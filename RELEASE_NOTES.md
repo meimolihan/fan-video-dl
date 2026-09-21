@@ -1,17 +1,17 @@
-修复: AV1/VP9 视频输出转码为 H.264, 解决浏览器无法播放
+修复: CLI 版本号重复 v
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.5
+docker pull mobufan/fan-video-dl:v1.1.6
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.5
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.6
 ```
 
 ## 一键脚本安装（systemd）
