@@ -6,9 +6,11 @@ fan-video-dl - Web UI for yt-dlp
 """
 
 import os
+import sys
 import logging
 import re
 import uuid
+import shutil
 import hashlib
 import hmac
 import secrets
@@ -365,6 +367,24 @@ def is_douyin_url(url):
     return douyin_downloader.is_douyin_url(url)
 
 
+def find_ytdlp():
+    """定位 yt-dlp 可执行文件:
+    1) YTDLP_BIN 环境变量显式指定
+    2) 系统 PATH (shutil.which)
+    3) 回退: 当前 Python venv 同目录 (install.sh 部署时 yt-dlp 装在 venv 里, 而 systemd 的 PATH 不含 venv)
+    """
+    override = os.environ.get('YTDLP_BIN', '').strip()
+    if override:
+        if os.path.isfile(override):
+            return override
+        logging.getLogger(__name__).warning(f"YTDLP_BIN 指定的文件不存在: {override}")
+    found = shutil.which('yt-dlp')
+    if found:
+        return found
+    venv_bin = Path(sys.executable).resolve().parent / 'yt-dlp'
+    return str(venv_bin) if venv_bin.is_file() else None
+
+
 def build_ytdlp_cmd(url, options, output_template=None):
     """构建 yt-dlp 命令行"""
     fmt = options.get('format', 'best')
@@ -381,7 +401,7 @@ def build_ytdlp_cmd(url, options, output_template=None):
         output_template = str(DOWNLOAD_DIR / f'%(title)s [%(id)s][{tag}].{ext}')
 
     cmd = [
-        'yt-dlp',
+        find_ytdlp() or 'yt-dlp',
         '--no-check-certificates',
         '--extractor-args', 'generic:impersonate',
         '--newline',
@@ -552,6 +572,15 @@ def run_download(task_id, url, options):
     # TikTok 链接需要重试机制: TikTok WAF 不稳定, 有时返回不完整页面
     is_tiktok = is_tiktok_url(url)
     max_attempts = 5 if is_tiktok else 1
+
+    ytdlp_bin = find_ytdlp()
+    if not ytdlp_bin:
+        with tasks_lock:
+            task['status'] = 'failed'
+            task['error'] = ('未检测到 yt-dlp。若为 systemd 部署请执行: '
+                             'sudo /var/lib/fan-video-dl/venv/bin/pip install -U yt-dlp; '
+                             '或以 root 执行: pip install -U yt-dlp')
+        return
 
     cmd = build_ytdlp_cmd(url, options)
     task['status'] = 'downloading'

@@ -1,17 +1,17 @@
-首个稳定版
+第二个稳定版
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.0.0
+docker pull mobufan/fan-video-dl:v1.0.1
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.0.0
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.0.1
 ```
 
 ## 一键脚本安装（systemd）
