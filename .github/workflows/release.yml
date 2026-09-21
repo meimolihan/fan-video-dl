@@ -1,0 +1,162 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建的标签 (例如: v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.ref_name || github.event.inputs.tag }}
+  DOCKERHUB_IMAGE: mobufan/fan-video-dl
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  publish-release:
+    name: 发布 Release (附带发版备注)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', github.event.inputs.tag) }}
+
+      - name: Validate tag format
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ ! "${{ github.event.inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "错误: 标签格式无效，必须以 'v' 开头，例如: v1.0.0"
+            exit 1
+          fi
+
+      - name: Prepare release body
+        run: |
+          if [ -f RELEASE_NOTES.md ]; then
+            cp RELEASE_NOTES.md _release_body.md
+          else
+            {
+              echo "Fan-Video-DL ${{ env.RELEASE_TAG }}"
+              echo ""
+              echo "Docker 镜像："
+              echo "  - Docker Hub：docker pull mobufan/fan-video-dl:${{ env.RELEASE_TAG }}"
+              echo "  - GHCR：docker pull ghcr.io/meimolihan/fan-video-dl:${{ env.RELEASE_TAG }}"
+            } > _release_body.md
+          fi
+
+      - name: Create / update Release
+        run: |
+          TAG="${{ env.RELEASE_TAG }}"
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "Fan-Video-DL $TAG" \
+            --notes-file _release_body.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-docker:
+    name: 构建推送 Docker 镜像 (Docker Hub + GHCR)
+    needs: publish-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', github.event.inputs.tag) }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          VER="${{ env.RELEASE_TAG }}"
+          VER_NO_V="${VER#v}"
+          TAGS="${{ env.DOCKERHUB_IMAGE }}:${VER},${{ env.DOCKERHUB_IMAGE }}:latest"
+          TAGS="${TAGS},${{ env.GHCR_IMAGE }}:${VER},${{ env.GHCR_IMAGE }}:${VER_NO_V}"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ env.RELEASE_TAG }}
+          labels: |
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
+            org.opencontainers.image.source=https://github.com/meimolihan/fan-video-dl
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: mobufan/fan-video-dl
+          readme-filepath: ./README.md
+
+  sync-cnb:
+    name: 同步到 CNB 镜像仓库
+    needs: build-docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', github.event.inputs.tag) }}
+
+      - name: Sync to CNB Repository
+        if: ${{ env.CNB_TOKEN != '' }}
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_ACCESS_TOKEN }}
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:${{ github.workspace }} \
+            -w ${{ github.workspace }} \
+            -e PLUGIN_TARGET_URL="https://cnb.cool/meimolihan/fan-video-dl.git" \
+            -e PLUGIN_AUTH_TYPE="https" \
+            -e PLUGIN_USERNAME="cnb" \
+            -e PLUGIN_PASSWORD="$CNB_TOKEN" \
+            -e PLUGIN_FORCE="true" \
+            -e PLUGIN_PUSH_TAGS="true" \
+            tencentcom/git-sync
+
+      - name: Skip CNB sync
+        if: ${{ env.CNB_TOKEN == '' }}
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_ACCESS_TOKEN }}
+        run: echo "::warning::CNB_ACCESS_TOKEN 未配置，跳过同步到 CNB 镜像仓库"
