@@ -1,17 +1,17 @@
-修复: CLI 版本号重复 v
+修复: AV1 转码保证可播放; 进度实时刷新
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.6
+docker pull mobufan/fan-video-dl:v1.1.7
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.6
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.7
 ```
 
 ## 一键脚本安装（systemd）
