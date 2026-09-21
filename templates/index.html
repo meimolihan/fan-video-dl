@@ -755,6 +755,10 @@
         .proxy-status { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.12rem 0.5rem; border-radius: 6px; background: var(--bg-input); color: var(--text-secondary); vertical-align: middle; }
         .proxy-status.on { color: var(--success, #2ecc71); background: rgba(46, 204, 113, 0.15); }
         #proxyUrl:disabled { opacity: 0.5; cursor: not-allowed; }
+        .proxy-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+        .proxy-test-result { display: block; font-size: 0.8rem; font-weight: 600; margin-top: 0.25rem; min-height: 1.1em; }
+        .proxy-test-result.ok { color: var(--success, #2ecc71); }
+        .proxy-test-result.err { color: var(--danger, #e74c3c); }
     </style>
 </head>
 <body>
@@ -924,7 +928,11 @@
             <div class="account-field proxy-row">
                 <label class="proxy-option"><input type="checkbox" id="proxyEnabled" onchange="checkProxyEnabled()"> 启用代理</label>
             </div>
-            <button class="btn-account" onclick="saveProxyConfig()">保存代理设置</button>
+            <div class="account-field proxy-btns">
+                <button class="btn-account btn-proxy-test" onclick="testProxyConfig(event)">测试代理</button>
+                <button class="btn-account" onclick="saveProxyConfig(event)">保存代理设置</button>
+            </div>
+            <span class="proxy-test-result" id="proxyTestResult"></span>
         </div>
         <button class="btn-logout" onclick="doLogout()">退出登录</button>
     </div>
@@ -1036,11 +1044,41 @@ function checkProxyEnabled() {
     document.getElementById('proxyUrl').disabled = !enabled;
     updateProxyStatus(enabled && document.getElementById('proxyUrl').value.trim());
 }
-async function saveProxyConfig() {
+function showProxyTestResult(text, cls) {
+    const el = document.getElementById('proxyTestResult');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'proxy-test-result' + (cls ? ' ' + cls : '');
+}
+async function testProxyConfig(e) {
+    const url = document.getElementById('proxyUrl').value.trim();
+    if (!url) { showToast('请先填写代理地址', 'error'); return; }
+    const btn = (e || event).target;
+    btn.disabled = true;
+    showProxyTestResult('⏳ 测试中…', '');
+    try {
+        const resp = await fetch('/api/proxy-config/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const data = await resp.json();
+        if (resp.ok && data.ok) {
+            showProxyTestResult('✅ 代理可用 · ' + (data.ip ? '出口IP ' + data.ip + ' · ' : '') + data.latency_ms + 'ms', 'ok');
+        } else {
+            showProxyTestResult('❌ ' + (data.error || '连接失败'), 'err');
+        }
+    } catch(err) {
+        showProxyTestResult('❌ 请求失败: ' + err.message, 'err');
+    } finally {
+        btn.disabled = false;
+    }
+}
+async function saveProxyConfig(e) {
     const url = document.getElementById('proxyUrl').value.trim();
     const enabled = document.getElementById('proxyEnabled').checked;
     if (enabled && !url) { showToast('启用代理需填写代理地址', 'error'); return; }
-    const btn = event.target;
+    const btn = (e || event).target;
     const oldText = btn.textContent;
     btn.disabled = true;
     try {

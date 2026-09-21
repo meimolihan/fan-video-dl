@@ -1055,6 +1055,59 @@ def proxy_config_post():
     return jsonify({'status': 'ok', **cfg})
 
 
+@app.route('/api/proxy-config/test', methods=['POST'])
+@login_required
+def proxy_config_test():
+    """测试代理连通性 (不保存配置). 通过代理请求 google/youtube 204, 成功则附出口 IP"""
+    data = request.get_json(silent=True) or {}
+    test_url = str(data.get('url') or '').strip()
+    if not test_url:
+        test_url = douyin_downloader.get_proxy_config().get('url', '')
+    if not test_url:
+        return jsonify({'error': '请填写代理地址'}), 400
+    if not re.match(r'^(https?|socks4|socks4a|socks5|socks5h)://', test_url, re.I):
+        return jsonify({'error': '代理地址格式无效'}), 400
+
+    proxies = {'http': test_url, 'https': test_url}
+    import time as _time
+    first_err = ''
+    ok = False
+    latency_ms = 0.0
+    timed_out = False
+    from curl_cffi import requests as cffi
+    for target in ('https://www.googleapis.com/generate_204',
+                   'https://www.youtube.com/generate_204'):
+        try:
+            t0 = _time.time()
+            r = cffi.get(target, impersonate='chrome', timeout=10, proxies=proxies)
+            latency_ms = (_time.time() - t0) * 1000
+            if r.status_code in (200, 204):
+                ok = True
+                break
+        except Exception as e:
+            emsg = str(e)
+            if 'timed out' in emsg or 'Timeout' in emsg:
+                timed_out = True
+            first_err = emsg
+
+    if not ok:
+        error = '连接超时' if timed_out else (first_err or '目标不可达')
+        return jsonify({'ok': False, 'error': error}), 400
+
+    # 获取代理出口 IP (失败不影响结果)
+    ip = ''
+    try:
+        r = cffi.get('https://api.ipify.org/?format=json', impersonate='chrome', timeout=8,
+                     proxies=proxies)
+        if r.status_code == 200:
+            ip = json.loads(r.text).get('ip', '')
+    except Exception:
+        pass
+    logging.getLogger(__name__).info(
+        f"代理连通测试通过: {test_url} {int(latency_ms)}ms" + (f" 出口IP {ip}" if ip else ""))
+    return jsonify({'ok': True, 'latency_ms': round(latency_ms, 1), 'ip': ip})
+
+
 @app.route('/api/douyin/info', methods=['POST'])
 @login_required
 def douyin_info():
