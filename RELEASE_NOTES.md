@@ -1,17 +1,17 @@
-修复: AV1 转码保证可播放; 进度实时刷新
+修复: 转码超时保护与日志
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.7
+docker pull mobufan/fan-video-dl:v1.1.8
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.7
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.8
 ```
 
 ## 一键脚本安装（systemd）
