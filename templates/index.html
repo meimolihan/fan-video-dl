@@ -899,7 +899,7 @@
 <div class="modal" id="playerModal" onclick="closePlayer(event)">
     <div class="modal-content">
         <button class="modal-close" onclick="closePlayer()">&times;</button>
-        <video id="player" controls autoplay></video>
+        <video id="player" controls autoplay playsinline preload="metadata"></video>
     </div>
 </div>
 
@@ -1346,15 +1346,20 @@ function formatSize(bytes) {
 function esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-function downloadFile(name) { window.location.href = `/api/file/${name}`; }
+function downloadFile(name) { window.location.href = `/api/file/stream?name=${name}`; }
 function deleteFile(name) {
     if (!confirm('确定删除文件？')) return;
-    fetch(`/api/file/${name}`, { method: 'DELETE' }).then(() => { showToast('文件已删除', 'success'); fetchFiles(); });
+    fetch(`/api/file?name=${name}`, { method: 'DELETE' }).then(() => { showToast('文件已删除', 'success'); fetchFiles(); });
 }
 function playFile(name) {
+    // name 已是被 URL 编码后的参数, 直接拼入 query 参数, 避免路径段特殊字符/编码歧义
     const modal = document.getElementById('playerModal');
     const player = document.getElementById('player');
-    player.src = `/api/file/${name}/stream`;
+    player.onerror = function() {
+        showToast('播放失败：文件可能已损坏或编码不受浏览器支持', 'error');
+    };
+    player.src = `/api/file/stream?name=${name}`;
+    player.load();
     modal.classList.add('active');
 }
 function closePlayer(e) {

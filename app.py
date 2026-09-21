@@ -1370,6 +1370,61 @@ def list_files():
     return jsonify(files)
 
 
+@app.route('/api/file/stream')
+@login_required
+def stream_file_query():
+    """流式播放(query 参数版): 规避文件名含特殊字符时的路径编码歧义"""
+    filename = request.args.get('name', '')
+    if not filename:
+        return jsonify({'error': '缺少 name 参数'}), 400
+    filepath = DOWNLOAD_DIR / filename
+    base = DOWNLOAD_DIR.resolve()
+    if base not in filepath.resolve().parents:
+        return jsonify({'error': '非法的文件名'}), 400
+    # 边下边播: 如果正式文件不存在, 尝试 .part 文件
+    if not filepath.exists():
+        part_path = DOWNLOAD_DIR / (filename + '.part')
+        if part_path.exists():
+            filepath = part_path
+        else:
+            return jsonify({'error': '文件不存在'}), 404
+    mime_type, _ = mimetypes.guess_type(str(filepath))
+    return send_file(str(filepath), mimetype=mime_type, conditional=True)
+
+
+@app.route('/api/file', methods=['GET'])
+@login_required
+def download_file_query():
+    """下载文件(query 参数版)"""
+    filename = request.args.get('name', '')
+    if not filename:
+        return jsonify({'error': '缺少 name 参数'}), 400
+    filepath = DOWNLOAD_DIR / filename
+    base = DOWNLOAD_DIR.resolve()
+    if base not in filepath.resolve().parents:
+        return jsonify({'error': '非法的文件名'}), 400
+    if not filepath.exists():
+        return jsonify({'error': '文件不存在'}), 404
+    return send_file(str(filepath), as_attachment=True, download_name=filename)
+
+
+@app.route('/api/file', methods=['DELETE'])
+@login_required
+def delete_file_query():
+    """删除文件(query 参数版)"""
+    filename = request.args.get('name', '')
+    if not filename:
+        return jsonify({'error': '缺少 name 参数'}), 400
+    filepath = DOWNLOAD_DIR / filename
+    base = DOWNLOAD_DIR.resolve()
+    if base not in filepath.resolve().parents:
+        return jsonify({'error': '非法的文件名'}), 400
+    if not filepath.exists():
+        return jsonify({'error': '文件不存在'}), 404
+    filepath.unlink()
+    return jsonify({'status': 'deleted'})
+
+
 @app.route('/api/file/<path:filename>')
 @login_required
 def download_file(filename):
