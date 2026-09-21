@@ -1,17 +1,17 @@
-修复: 转码超时保护与日志
+首个稳定版
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.8
+docker pull mobufan/fan-video-dl:v1.0.0
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.8
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.0.0
 ```
 
 ## 一键脚本安装（systemd）
