@@ -1,17 +1,17 @@
-新功能: UI 网络代理配置, 对 yt-dlp 与抖音/网页提取请求统一生效; 优化暗色主题与移动端布局
+补发: 代理配置增加连通性测试按钮(含出口IP)
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.0
+docker pull mobufan/fan-video-dl:v1.1.1
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.0
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.1
 ```
 
 ## 一键脚本安装（systemd）
