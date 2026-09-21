@@ -135,6 +135,7 @@ is_valid_src() {
 
 PORT=""
 DATA_DIR=""
+DOWNLOAD_DIR=""
 APP_DIR_EXPLICIT=0
 SRC_DIR=""
 SRC_DIR_EXPLICIT=0
@@ -164,6 +165,11 @@ while [ "$#" -gt 0 ]; do
       [ -n "${1:-}" ] || error "缺少 -D/--data 的值"
       DATA_DIR="$1"
       ;;
+    -L|--downloads)
+      shift
+      [ -n "${1:-}" ] || error "缺少 -L/--downloads 的值"
+      DOWNLOAD_DIR="$1"
+      ;;
     -s|--src)
       shift
       [ -n "${1:-}" ] || error "缺少 -s/--src 的值"
@@ -175,10 +181,11 @@ while [ "$#" -gt 0 ]; do
       ;;
     -h|--help)
       printf "%s\n" "${gl_lan}fan-video-dl${reset} - ${gl_bai}Web 视频下载器(基于 yt-dlp) 安装脚本${reset}"
-      printf "  %-13s %s\n" "${gl_bai}用法:${reset}" "bash scripts/install.sh [-p PORT] [-d APP_DIR] [-D DATA_DIR] [-s SRC] [-y]"
+      printf "  %-13s %s\n" "${gl_bai}用法:${reset}" "bash scripts/install.sh [-p PORT] [-d APP_DIR] [-D DATA_DIR] [-L DOWNLOADS] [-s SRC] [-y]"
       printf "  %-13s %s\n" "${gl_bai}-p, --port${reset}" "监听端口（默认 ${gl_lan}${DEFAULT_PORT}${reset}）"
       printf "  %-13s %s\n" "${gl_bai}-d, --install${reset}" "程序安装目录（默认 ${gl_lan}${APP_DIR}${reset}）"
       printf "  %-13s %s\n" "${gl_bai}-D, --data${reset}" "数据目录（默认 ${gl_lan}${APP_DIR}/data${reset}）"
+      printf "  %-13s %s\n" "${gl_bai}-L, --downloads${reset}" "下载目录（默认 ${gl_lan}${APP_DIR}/data/downloads${reset}）"
       printf "  %-13s %s\n" "${gl_bai}-s, --src${reset}" "源码仓库路径（默认 ${gl_lan}${DEFAULT_SRC_DIR}${reset}）"
       printf "  %-13s %s\n" "${gl_bai}-y, --yes${reset}" "免交互，未指定项全部使用默认值"
       printf "  %-13s %s\n" "${gl_bai}-h, --help${reset}" "显示本帮助"
@@ -292,6 +299,7 @@ if [ -n "${PORT}" ]; then
   SILENT="y"
 fi
 [ -n "${DATA_DIR}" ] && SILENT="y"
+[ -n "${DOWNLOAD_DIR}" ] && SILENT="y"
 [ "${APP_DIR_EXPLICIT}" = "1" ] && SILENT="y"
 [ -n "${SRC_DIR}" ] && SILENT="y"
 [ ! -t 0 ] && SILENT="y"
@@ -334,6 +342,13 @@ else
   printf "  %-14s %s\n" "${gl_lan}数据目录${reset}" "${gl_bai}${DATA_DIR}${reset}（参数指定）"
 fi
 DATA_DIR="${DATA_DIR:-${APP_DIR}/data}"
+
+# download dir prompt (-L/--downloads 指定, 默认 ${DATA_DIR}/downloads)
+if [ -z "${DOWNLOAD_DIR}" ]; then
+  printf "  %-14s %s\n" "${gl_lan}下载目录${reset}" "${gl_bai}${DATA_DIR}/downloads${reset}（默认跟随数据目录）"
+else
+  printf "  %-14s %s\n" "${gl_lan}下载目录${reset}" "${gl_bai}${DOWNLOAD_DIR}${reset}（参数指定）"
+fi
 
 # ---- 获取源码 ----
 if [ "${SRC_DIR_EXPLICIT}" != "1" ]; then
@@ -474,16 +489,21 @@ ok "Python 依赖安装完成"
 
 ensure_ffmpeg
 
-# 3) 数据目录 & 软链接（数据与程序分离，便于备份/还原）
+# 3) 数据目录 & 下载目录 & 软链接（数据与程序分离，便于备份/还原）
 [ -L "${APP_DIR}/data" ] && rm -f "${APP_DIR}/data"
 [ -L "${APP_DIR}/downloads" ] && rm -f "${APP_DIR}/downloads"
-mkdir -p "${DATA_DIR}" "${DATA_DIR}/downloads"
+mkdir -p "${DATA_DIR}"
 if [ "${DATA_DIR}" != "${APP_DIR}/data" ]; then
   ln -s "${DATA_DIR}" "${APP_DIR}/data"
 fi
-ln -s "${DATA_DIR}/downloads" "${APP_DIR}/downloads"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-${DATA_DIR}/downloads}"
+mkdir -p "${DOWNLOAD_DIR}"
+# 下载目录与 APP_DIR/downloads 相同(特例)时不建自软链接
+if [ "$(cd "${DOWNLOAD_DIR}" && pwd)" != "${APP_DIR}/downloads" ]; then
+  ln -s "${DOWNLOAD_DIR}" "${APP_DIR}/downloads"
+fi
 chmod 700 "${DATA_DIR}"
-ok "数据目录 ${gl_lan}${DATA_DIR}${reset} 已就绪（含 users.db 与 downloads）"
+ok "数据目录 ${gl_lan}${DATA_DIR}${reset}、下载目录 ${gl_lan}${DOWNLOAD_DIR}${reset} 已就绪"
 
 # 4) 登录凭据（默认 admin/admin123，可用环境变量覆盖）
 AUTH_USERNAME="${AUTH_USERNAME:-admin}"
