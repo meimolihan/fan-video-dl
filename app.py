@@ -454,9 +454,10 @@ def build_ytdlp_cmd(url, options, output_template=None):
     cmd.extend(['--concurrent-fragments', str(concurrent)])
     cmd.extend(['--throttled-rate', '100K'])
 
-    # 统一输出为 mp4 (需 ffmpeg): 修复部分 YouTube 等站点得到 .webm 的问题
+    # 统一输出为 mp4 (需 ffmpeg): 修复部分站点得到 .webm / AV1 导致浏览器无法播放的问题。
+    # --recode-video mp4: 已是 H.264/HEVC 时仅 copy, AV1/VP9 自动转码为 H.264, 保证可播放
     if fmt != 'audio' and shutil.which('ffmpeg'):
-        cmd.extend(['--merge-output-format', 'mp4', '--remux-video', 'mp4'])
+        cmd.extend(['--merge-output-format', 'mp4', '--recode-video', 'mp4'])
 
     # 代理: UI 配置了代理时传递给 yt-dlp
     proxy_cfg = douyin_downloader.get_proxy_config()
