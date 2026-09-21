@@ -972,6 +972,7 @@ function showApp(username) {
     document.getElementById('userNameDisplay').textContent = '👤 ' + username;
     fetchTasks();
     fetchFiles();
+    startPolling();
 }
 
 async function doLogin() {
@@ -1205,13 +1206,14 @@ async function startDownload() {
 
 // === Tasks ===
 async function fetchTasks() {
-    const resp = await fetch('/api/tasks');
+    const resp = await fetch('/api/tasks', { cache: 'no-store' });
     if (resp.status === 401) { showLogin(); return; }
     const tasks = await resp.json();
     const container = document.getElementById('taskListPanel');
     if (tasks.length === 0) {
         container.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><p>暂无下载任务</p><p style="margin-top:0.5rem;font-size:0.8rem;">在上方输入链接开始下载</p></div>`;
         updateStats(tasks.length, null);
+        if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
         return;
     }
     container.innerHTML = tasks.map(t => {
@@ -1266,7 +1268,7 @@ async function fetchTasks() {
     tasks.forEach(t => {
         if (t.status === 'completed' && autoDownloadTasks.has(t.id) && t.output_file) {
             autoDownloadTasks.delete(t.id);
-            downloadFile(decodeURIComponent(t.output_file));
+            downloadFile(encodeURIComponent(t.output_file));
             showToast('下载完成,自动开始传输到本地: ' + t.output_file, 'success');
         }
     });
@@ -1314,7 +1316,7 @@ async function deleteTask(id) {
 
 // === Files ===
 async function fetchFiles() {
-    const resp = await fetch('/api/files');
+    const resp = await fetch('/api/files', { cache: 'no-store' });
     if (resp.status === 401) { showLogin(); return; }
     const files = await resp.json();
     const container = document.getElementById('fileListPanel');
@@ -1387,7 +1389,7 @@ let autoDownloadTasks = new Set();
 function startPolling() {
     if (pollingTimer) return;
     pollingTimer = setInterval(() => {
-        if (activeTasks.size > 0) fetchTasks();
+        fetchTasks();
     }, 1000);
 }
 

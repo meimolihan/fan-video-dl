@@ -454,10 +454,9 @@ def build_ytdlp_cmd(url, options, output_template=None):
     cmd.extend(['--concurrent-fragments', str(concurrent)])
     cmd.extend(['--throttled-rate', '100K'])
 
-    # 统一输出为 mp4 (需 ffmpeg): 修复部分站点得到 .webm / AV1 导致浏览器无法播放的问题。
-    # --recode-video mp4: 已是 H.264/HEVC 时仅 copy, AV1/VP9 自动转码为 H.264, 保证可播放
+    # 合并输出优先 mp4 容器; 编码兼容性由下载后的 ensure_browser_playable() 兜底处理
     if fmt != 'audio' and shutil.which('ffmpeg'):
-        cmd.extend(['--merge-output-format', 'mp4', '--recode-video', 'mp4'])
+        cmd.extend(['--merge-output-format', 'mp4'])
 
     # 代理: UI 配置了代理时传递给 yt-dlp
     proxy_cfg = douyin_downloader.get_proxy_config()
@@ -466,6 +465,67 @@ def build_ytdlp_cmd(url, options, output_template=None):
 
     cmd.append(url)
     return cmd
+
+
+def ensure_browser_playable(filename, task=None):
+    """确保输出文件为浏览器可直接播放的 H.264/AAC MP4。
+
+    对 AV1/VP9/HEVC 等编码或非 MP4 容器自动用 ffmpeg 转码, 已是 H.264 MP4 则跳过。
+    就地替换 (必要时改扩展名为 .mp4), 失败时保留原文件。返回最终文件名。
+    """
+    try:
+        path = DOWNLOAD_DIR / filename
+        if not path.exists() or path.suffix.lower() not in ('.mp4', '.mkv', '.webm', '.mov', '.m4v', '.flv', '.ts'):
+            return filename
+        if not (shutil.which('ffmpeg') and shutil.which('ffprobe')):
+            return filename
+
+        probe = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=format_name',
+             '-show_entries', 'stream=codec_type,codec_name', '-of', 'json', str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        info = json.loads(probe.stdout or '{}')
+        container = (info.get('format', {}) or {}).get('format_name', '')
+        vcodec, acodec, has_audio = '', '', False
+        for st in info.get('streams', []) or []:
+            ctype = st.get('codec_type')
+            if ctype == 'video' and not vcodec:
+                vcodec = (st.get('codec_name') or '').lower()
+            elif ctype == 'audio':
+                acodec = acodec or (st.get('codec_name') or '').lower()
+                has_audio = True
+        is_mp4 = ('mp4' in container) or ('mov' in container)
+        if vcodec == 'h264' and is_mp4 and (not has_audio or acodec == 'aac'):
+            return filename
+
+        if task is not None:
+            with tasks_lock:
+                task['status'] = 'merging'
+                task['percent'] = 100.0
+
+        tmp = path.with_name(path.stem + '.transcode.tmp.mp4')
+        args = ['ffmpeg', '-y', '-i', str(path), '-map', '0:v:0']
+        if has_audio:
+            args += ['-map', '0:a:0?']
+        args += ['-c:v', 'libx264', '-crf', '20', '-preset', 'veryfast', '-pix_fmt', 'yuv420p']
+        if has_audio:
+            args += ['-c:a', 'aac', '-b:a', '192k']
+        args += ['-movflags', '+faststart', str(tmp)]
+        run = subprocess.run(args, capture_output=True, text=True)
+        if run.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            path.unlink()
+            newpath = path.with_suffix('.mp4')
+            tmp.replace(newpath)
+            logging.getLogger(__name__).info(f'已转码为浏览器可播放的 H.264: {newpath.name} (源编码 {vcodec or "未知"})')
+            return newpath.name
+        if tmp.exists():
+            tmp.unlink()
+        logging.getLogger(__name__).warning(f'转码失败, 保留原文件 {filename}: {(run.stderr or "")[-300:]}')
+        return filename
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'转码检查异常: {e}')
+        return filename
 
 
 def run_douyin_download(task_id, url, options):
@@ -580,6 +640,7 @@ def run_douyin_download(task_id, url, options):
                 with tasks_lock:
                     task['error'] = f'音频提取异常: {str(ae)}, 保留视频文件'
 
+        filename = ensure_browser_playable(filename, task)
         with tasks_lock:
             task['status'] = 'completed'
             task['percent'] = 100.0
@@ -830,6 +891,7 @@ def run_download(task_id, url, options):
             ret = process.returncode
 
             if ret == 0:
+                resolved = None
                 with tasks_lock:
                     task['status'] = 'completed'
                     task['percent'] = 100.0
@@ -844,6 +906,13 @@ def run_download(task_id, url, options):
                             if f.is_file() and f.suffix in ['.mp4', '.mkv', '.webm', '.mp3', '.m4a']:
                                 task['output_file'] = f.name
                                 break
+                    resolved = task.get('output_file')
+                if resolved:
+                    new_name = ensure_browser_playable(resolved, task)
+                    with tasks_lock:
+                        task['output_file'] = new_name
+                        task['status'] = 'completed'
+                        task['percent'] = 100.0
                 download_success = True
                 break  # 下载成功, 退出重试循环
             else:
@@ -926,8 +995,9 @@ def run_download(task_id, url, options):
                             task['output_file'] = m_dest.group(1).strip()
                 process2.wait()
                 ret2 = process2.returncode
-                with tasks_lock:
-                    if ret2 == 0:
+                if ret2 == 0:
+                    resolved2 = None
+                    with tasks_lock:
                         task['status'] = 'completed'
                         task['percent'] = 100.0
                         task['completed_at'] = time.time()
@@ -937,7 +1007,15 @@ def run_download(task_id, url, options):
                                 if f.is_file() and f.suffix in ['.mp4', '.mkv', '.webm', '.mp3', '.m4a']:
                                     task['output_file'] = f.name
                                     break
-                    else:
+                        resolved2 = task.get('output_file')
+                    if resolved2:
+                        new_name2 = ensure_browser_playable(resolved2, task)
+                        with tasks_lock:
+                            task['output_file'] = new_name2
+                            task['status'] = 'completed'
+                            task['percent'] = 100.0
+                else:
+                    with tasks_lock:
                         task['status'] = 'failed'
                         task['error'] = f'智能提取后下载仍失败 (退出码 {ret2})'
             except Exception as e2:
