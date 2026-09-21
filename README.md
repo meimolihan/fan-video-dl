@@ -23,6 +23,8 @@
 - 🎨 **明暗主题切换** — 默认亮色主题，一键切换暗色，`localStorage` 记住选择
 - ❌ **错误信息** — yt-dlp 报错直接显示在任务列表，不再只显示退出码
 - 🧹 **缓存清理** — 一键清除临时文件和失效任务记录
+- 🌐 **网络代理配置** — 账户页可视化设置并测试 http/socks4/socks5 代理（含出口 IP 显示），对 yt-dlp、抖音 API、网页提取请求统一生效
+- 🎞️ **统一 MP4 输出** — 安装 ffmpeg 时下载后自动转封装，避免 YouTube 等站点输出 `.webm`
 - 🐳 **Docker 部署** — 一键 `docker-compose up -d` 启动
 
 ## 🚀 快速开始
@@ -40,6 +42,39 @@ docker-compose up -d
 默认账号 `admin` / `admin123`
 
 > ⚠️ **请务必在登录后修改默认密码**，或在部署时通过 `AUTH_USERNAME` / `AUTH_PASSWORD` 环境变量覆盖。
+
+### 一键脚本安装（systemd 推荐）
+
+无需克隆仓库，一条命令自动安装：拉取源码、创建 `/var/lib/fan-video-dl` venv、安装 `yt-dlp`/`curl_cffi`/`ffmpeg`、注册 systemd 服务。
+
+```bash
+bash -c "$(curl -sSL https://raw.githubusercontent.com/meimolihan/fan-video-dl/main/scripts/install.sh)" -p 5200 -y
+```
+
+参数说明：
+
+| 参数 | 说明 | 默认值 |
+|---|---|---|
+| `-p, --port` | 监听端口 | `5200` |
+| `-d, --install` | 程序安装目录 | `/var/lib/fan-video-dl` |
+| `-D, --data` | 数据目录（用户库 / SECRET_KEY） | `${安装目录}/data` |
+| `-L, --downloads` | 下载文件目录 | `${数据目录}/downloads` |
+| `-s, --src` | 本地源码仓库路径（需含 `app.py`） | 自动从 GitHub 拉取 |
+| `-y, --yes` | 免交互，未指定项全部用默认值 | - |
+
+示例（自定义安装/数据/下载目录到独立磁盘）：
+
+```bash
+bash -c "$(curl -sSL https://raw.githubusercontent.com/meimolihan/fan-video-dl/main/scripts/install.sh)" \
+  -p 5200 -d /opt/fan-video-dl -D /var/lib/fan-video-dl-data -L /mnt/down-disk/downloads -y
+```
+
+> 国内网络拉取源码缓慢时，用镜像仓库加速：
+> `FAN_VIDEO_DL_REPO=https://ghfast.top/https://github.com/meimolihan/fan-video-dl.git bash -c "$(curl ...)" -p 5200 -y`
+
+升级方式：再次执行同样的 install.sh 命令（数据自动保留）。命令行工具：`fan-video-dl help`。
+
+登录访问 `http://<服务器IP>:5200`，默认账号 `admin` / `admin123`（登录后请立即修改）。
 
 ### 本地运行
 
@@ -120,6 +155,10 @@ fan-video-dl/
 
 ### 历史更新
 
+- **一键安装脚本增强** — 新增 `-d` 程序目录 / `-D` 数据目录 / `-L` 下载目录自定义；修复旧安装目录被误识别为源码、导致升级无法拉取新版的问题
+- **MP4 统一输出** — 检测到 ffmpeg 时自动 `--merge-output-format mp4 --remux-video mp4`，修复部分 YouTube 视频输出 `.webm`（v1.1.2）
+- **代理连通测试** — 代理配置支持一键测试与出口 IP 显示（v1.1.1）
+- **网络代理配置** — 账户页可视化设置代理，yt-dlp 与抖音 API、网页提取统一生效（v1.1.0）
 - **抖音无水印下载** — 专用 API 获取无水印视频，自动检测抖音链接，预览视频信息
 - **主题切换** — 默认亮色主题，支持暗色切换，`localStorage` 记住选择
 - **自动下载** — 存服务器模式完成后自动触发浏览器下载
