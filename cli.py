@@ -36,7 +36,7 @@ VERSION = "unknown"
 try:
     vf = Path(__file__).resolve().parent / "version.txt"
     if vf.exists():
-        VERSION = vf.read_text(encoding="utf-8").strip() or "unknown"
+        VERSION = vf.read_text(encoding="utf-8").strip().lstrip("v") or "unknown"
 except Exception:
     VERSION = "unknown"
 
@@ -637,7 +637,7 @@ def cmd_help():
 
 
 def cmd_version():
-    print(f"{BIN_NAME} {VERSION}")
+    print(f"{BIN_NAME} v{VERSION}")
     return 0
 
 
