@@ -114,7 +114,13 @@ resolve_local_src() {
     "$(dirname "$(pwd)")"
     "$(dirname "$(dirname "$(pwd)")")"
   )
+  local c cc app_canon
+  app_canon="$(cd "${APP_DIR}" 2>/dev/null && pwd)"
   for c in "${candidates[@]}"; do
+    [ -n "${c}" ] || continue
+    cc="$(cd "${c}" 2>/dev/null && pwd)" || continue
+    # 安装目录本身是旧版程序目录, 不能当作"本地源码"使用, 否则会 cp 自身且永远拉不到新版
+    [ -n "${app_canon}" ] && [ "${cc}" = "${app_canon}" ] && continue
     if [ -f "${c}/app.py" ] && [ -f "${c}/requirements.txt" ]; then
       printf '%s' "${c}"
       return 0
@@ -323,6 +329,17 @@ if [ "${SRC_DIR_EXPLICIT}" != "1" ]; then
   DISCOVERED_SRC="$(resolve_local_src)" || true
   if [ -n "${DISCOVERED_SRC:-}" ]; then
     SRC_DIR="${DISCOVERED_SRC}"
+  fi
+fi
+
+# 源码目录即安装目录(旧版安装残留)时: 显式 -s 直接报错; 否则改为远程拉取最新代码
+if [ -n "${SRC_DIR:-}" ]; then
+  if [ "$(cd "${SRC_DIR}" 2>/dev/null && pwd)" = "$(cd "${APP_DIR}" 2>/dev/null && pwd)" ]; then
+    if [ "${SRC_DIR_EXPLICIT}" = "1" ]; then
+      error "安装目录 ${APP_DIR} 是旧版程序目录, 不能作为 -s 源码; 请去掉 -s 让脚本自动拉取最新代码"
+    fi
+    printf "  %s %s\n" "${gl_huang}[提示]${reset}" "检测到源码目录为已有安装目录(旧版残留), 改为远程拉取最新代码"
+    SRC_DIR=""
   fi
 fi
 
