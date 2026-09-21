@@ -504,24 +504,47 @@ def ensure_browser_playable(filename, task=None):
                 task['status'] = 'merging'
                 task['percent'] = 100.0
 
+        # 预估时长用于超时保护, 避免超大视频/异常文件无限卡在合并中
+        dur = 0.0
+        try:
+            dprobe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'csv=p=0', str(path)], capture_output=True, text=True, timeout=20)
+            if dprobe.stdout.strip():
+                dur = float(dprobe.stdout.strip().splitlines()[0])
+        except Exception:
+            pass
+        timeout_s = max(600, int(dur) * 3 + 600)
+
         tmp = path.with_name(path.stem + '.transcode.tmp.mp4')
-        args = ['ffmpeg', '-y', '-i', str(path), '-map', '0:v:0']
+        args = ['ffmpeg', '-nostdin', '-y', '-i', str(path), '-map', '0:v:0']
         if has_audio:
             args += ['-map', '0:a:0?']
         args += ['-c:v', 'libx264', '-crf', '20', '-preset', 'veryfast', '-pix_fmt', 'yuv420p']
         if has_audio:
             args += ['-c:a', 'aac', '-b:a', '192k']
         args += ['-movflags', '+faststart', str(tmp)]
-        run = subprocess.run(args, capture_output=True, text=True)
+        logging.getLogger(__name__).info(
+            f'开始转码 {path.name} (源编码 {vcodec}, 时长 {dur:.0f}s, 超时上限 {timeout_s}s) -> H.264/AAC MP4')
+        t0 = time.time()
+        try:
+            run = subprocess.run(args, capture_output=True, text=True, timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            tmp.unlink(missing_ok=True)
+            logging.getLogger(__name__).warning(f'转码超时(>{timeout_s}s), 保留原文件 {path.name}')
+            return filename
+        elapsed = time.time() - t0
         if run.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             path.unlink()
             newpath = path.with_suffix('.mp4')
             tmp.replace(newpath)
-            logging.getLogger(__name__).info(f'已转码为浏览器可播放的 H.264: {newpath.name} (源编码 {vcodec or "未知"})')
+            logging.getLogger(__name__).info(
+                f'转码完成 {newpath.name} (源编码 {vcodec}, 耗时 {elapsed:.0f}s)')
             return newpath.name
         if tmp.exists():
             tmp.unlink()
-        logging.getLogger(__name__).warning(f'转码失败, 保留原文件 {filename}: {(run.stderr or "")[-300:]}')
+        logging.getLogger(__name__).warning(
+            f'转码失败, 保留原文件 {filename}: {(run.stderr or "")[-300:]}')
         return filename
     except Exception as e:
         logging.getLogger(__name__).warning(f'转码检查异常: {e}')
