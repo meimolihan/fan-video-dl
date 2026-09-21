@@ -1,17 +1,17 @@
-补发: 代理配置增加连通性测试按钮(含出口IP)
+修复: YouTube 等站点下载得到 .webm 的问题, 有 ffmpeg 时自动转封装为 mp4
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.1
+docker pull mobufan/fan-video-dl:v1.1.2
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.1
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.2
 ```
 
 ## 一键脚本安装（systemd）
