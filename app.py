@@ -367,22 +367,40 @@ def is_douyin_url(url):
     return douyin_downloader.is_douyin_url(url)
 
 
-def find_ytdlp():
-    """定位 yt-dlp 可执行文件:
+def _get_ytdlp_invocation():
+    """解析 yt-dlp 启动命令 (返回 argv 列表):
     1) YTDLP_BIN 环境变量显式指定
     2) 系统 PATH (shutil.which)
     3) 回退: 当前 Python venv 同目录 (install.sh 部署时 yt-dlp 装在 venv 里, 而 systemd 的 PATH 不含 venv)
+    4) 再回退: 若是 Python 包已安装但缺少脚本入口 (pip 安装异常等), 用 `python -m yt_dlp`
+    全部失败返回 None
     """
     override = os.environ.get('YTDLP_BIN', '').strip()
     if override:
         if os.path.isfile(override):
-            return override
+            return [override]
         logging.getLogger(__name__).warning(f"YTDLP_BIN 指定的文件不存在: {override}")
     found = shutil.which('yt-dlp')
     if found:
-        return found
+        return [found]
     venv_bin = Path(sys.executable).resolve().parent / 'yt-dlp'
-    return str(venv_bin) if venv_bin.is_file() else None
+    if venv_bin.is_file():
+        return [str(venv_bin)]
+    try:
+        import importlib.util
+        if importlib.util.find_spec('yt_dlp') is not None:
+            return [sys.executable, '-m', 'yt_dlp']
+    except Exception:
+        pass
+    return None
+
+
+# 启动时解析一次并记录日志, 便于排查"yt-dlp 未安装"
+YTDLP_INV = _get_ytdlp_invocation()
+if YTDLP_INV:
+    logging.getLogger(__name__).info("yt-dlp 定位成功: %s", ' '.join(YTDLP_INV))
+else:
+    logging.getLogger(__name__).warning("未检测到 yt-dlp, 请安装后重启服务")
 
 
 def build_ytdlp_cmd(url, options, output_template=None):
@@ -401,7 +419,7 @@ def build_ytdlp_cmd(url, options, output_template=None):
         output_template = str(DOWNLOAD_DIR / f'%(title)s [%(id)s][{tag}].{ext}')
 
     cmd = [
-        find_ytdlp() or 'yt-dlp',
+        *(YTDLP_INV or ['yt-dlp']),
         '--no-check-certificates',
         '--extractor-args', 'generic:impersonate',
         '--newline',
@@ -573,8 +591,7 @@ def run_download(task_id, url, options):
     is_tiktok = is_tiktok_url(url)
     max_attempts = 5 if is_tiktok else 1
 
-    ytdlp_bin = find_ytdlp()
-    if not ytdlp_bin:
+    if not YTDLP_INV:
         with tasks_lock:
             task['status'] = 'failed'
             task['error'] = ('未检测到 yt-dlp。若为 systemd 部署请执行: '
