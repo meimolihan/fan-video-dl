@@ -1,4 +1,4 @@
-日常更新
+添加开屏动画和logo图标
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
