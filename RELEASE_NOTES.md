@@ -1,17 +1,17 @@
-自动构建发布 v1.1.9
+日常更新
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.1.9
+docker pull mobufan/fan-video-dl:v1.2.1
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.1.9
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.2.1
 ```
 
 ## 一键脚本安装（systemd）
