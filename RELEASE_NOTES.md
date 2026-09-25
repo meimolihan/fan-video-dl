@@ -1,17 +1,17 @@
-优化 web 页面
+修改为 下载中 已下载 清记录 清缓存
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.2.2
+docker pull mobufan/fan-video-dl:v1.2.3
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.2.2
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.2.3
 ```
 
 ## 一键脚本安装（systemd）
