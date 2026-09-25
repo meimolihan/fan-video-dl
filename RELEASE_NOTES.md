@@ -1,17 +1,17 @@
-添加开屏动画和logo图标
+优化 web 页面
 
 ```bash
 docker pull mobufan/fan-video-dl:latest
 ```
 ```bash
-docker pull mobufan/fan-video-dl:v1.2.1
+docker pull mobufan/fan-video-dl:v1.2.2
 ```
 
 ```bash
 docker pull ghcr.io/meimolihan/fan-video-dl:latest
 ```
 ```bash
-docker pull ghcr.io/meimolihan/fan-video-dl:v1.2.1
+docker pull ghcr.io/meimolihan/fan-video-dl:v1.2.2
 ```
 
 ## 一键脚本安装（systemd）
