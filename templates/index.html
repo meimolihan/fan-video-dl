@@ -803,6 +803,44 @@
         .proxy-test-result { display: block; font-size: 0.8rem; font-weight: 600; margin-top: 0.25rem; min-height: 1.1em; }
         .proxy-test-result.ok { color: var(--success, #2ecc71); }
         .proxy-test-result.err { color: var(--danger, #e74c3c); }
+
+        /* ═══════════════════════════════════════════════════════════
+           明暗模式切换 · 径向揭示动画（View Transitions API）· 纯追加块
+           ═══════════════════════════════════════════════════════════ */
+
+        /* [Q0] 浅色态 color-scheme 兜底：项目为两态（浅色 = 无 data-theme 属性），
+           系统处于深色时若不声明，UA 仍会画出深色原生滚动条/表单控件压在浅色页面上。
+           深色一侧既有规则 [data-theme="dark"] { color-scheme: dark; }（见上文 [P1]），此处只并列补浅色。 */
+        html:not([data-theme="dark"]) { color-scheme: light; }
+
+        /* [Q1] 注册 --theme-r 为 <percentage>，是遮罩半径可逐帧插值的前提。
+           不支持 @property 的浏览器里变量无法插值，动画会静默失效（揭示瞬间完成）——
+           属预期降级，不报错，切勿误判为 bug。 */
+        @property --theme-r {
+          syntax: '<percentage>';
+          inherits: false;
+          initial-value: 0%;
+        }
+
+        /* [Q2] 关闭 View Transitions 默认的整页交叉淡化：
+             旧快照静止垫底层（z=1），新主题快照在上层（z=2），
+             以屏幕中心 50% 50% 为圆心用径向遮罩由内向外扩张揭示；
+             24% 为羽化带宽，170% 末端保证覆盖最远角落。 */
+        ::view-transition-old(root),
+        ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+        ::view-transition-old(root) { z-index: 1; }
+        ::view-transition-new(root) {
+          z-index: 2;
+          animation: theme-reveal 1.5s ease-out both;
+          mask-image: radial-gradient(circle at 50% 50%,
+            #000 var(--theme-r), transparent calc(var(--theme-r) + 24%));
+          -webkit-mask-image: radial-gradient(circle at 50% 50%,
+            #000 var(--theme-r), transparent calc(var(--theme-r) + 24%));
+        }
+        @keyframes theme-reveal {
+          from { --theme-r: 0%; }
+          to   { --theme-r: 170%; }
+        }
     </style>
 </head>
 <body>
@@ -1546,6 +1584,43 @@ function updateThemeIcon() {
 // === Init ===
 updateThemeIcon();
 checkAuth();
+</script>
+
+<!-- ===== 明暗切换 · 径向揭示（View Transitions）· 纯追加块 =====
+     既有 toggleTheme()/updateThemeIcon()/防闪烁内联脚本一律不动，
+     此处在其后接管同名入口（内联 onclick 在调用时才解析标识符，后声明的全局同名函数生效），
+     行为语义完全沿用项目现状：两态（深/浅）、localStorage 键 "theme"、浅色=移除 data-theme 属性、
+     图标为 emoji 文本替换（非 CSS 显隐，故无需 .ico-when-* 规则）。 -->
+<script>
+(function () {
+    var root = document.documentElement;
+    var KEY = "theme";
+
+    function pref() {
+        var t = null;
+        try { t = localStorage.getItem(KEY); } catch (e) { t = null; }
+        return (t === "dark" || t === "light") ? t : "light"; // 两态：非法/缺失=light（沿用原防闪烁脚本默认值）
+    }
+    function effective() { return pref(); } // 两态无 auto 分支，effective 恒等于显式偏好
+
+    function apply(p) {
+        if (p === "dark") { root.setAttribute("data-theme", "dark"); }
+        else { root.removeAttribute("data-theme"); } // 项目约定：浅色=无属性（既有 CSS 全部按此书写）
+        try { localStorage.setItem(KEY, p); } catch (e) {}
+        if (typeof updateThemeIcon === "function") updateThemeIcon(); // 必须在 VT 回调内同步执行，快照才能拿到新图标
+    }
+
+    function toggleTheme() {
+        var next = effective() === "dark" ? "light" : "dark";
+        // reduced-motion 守卫必须在 JS 侧：页面既有的 @media (prefers-reduced-motion) 规则
+        // 只匹配 .splash-logo，命中不了 ::view-transition-* 伪元素，仅靠 CSS 挡不住。
+        var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (!document.startViewTransition || reduce) { apply(next); return; } // 回退：直接切换，无动画、无报错
+        document.startViewTransition(function () { apply(next); });            // 带径向揭示动画切换（回调内只做同步状态变更）
+    }
+
+    window.toggleTheme = toggleTheme; // 接管既有按钮入口（纯追加，不改既有函数体）
+})();
 </script>
 </body>
 </html>
