@@ -458,12 +458,17 @@ ok "正在安装 ${gl_bai}${APP_NAME}${reset} 程序 ${gl_hong}.${gl_huang}.${gl
 mkdir -p "${APP_DIR}"
 cp -f "${SRC_DIR}/app.py" "${APP_DIR}/app.py"
 cp -f "${SRC_DIR}/douyin_downloader.py" "${APP_DIR}/douyin_downloader.py"
+cp -f "${SRC_DIR}/bark_notify.py" "${APP_DIR}/bark_notify.py"
 [ -f "${SRC_DIR}/version.txt" ] && cp -f "${SRC_DIR}/version.txt" "${APP_DIR}/version.txt"
 [ -f "${SRC_DIR}/requirements.txt" ] && cp -f "${SRC_DIR}/requirements.txt" "${APP_DIR}/requirements.txt"
 [ -f "${SRC_DIR}/cli.py" ] && cp -f "${SRC_DIR}/cli.py" "${APP_DIR}/cli.py"
 rm -rf "${APP_DIR}/templates"
 mkdir -p "${APP_DIR}/templates"
 cp -rf "${SRC_DIR}/templates/." "${APP_DIR}/templates/"
+if [ -d "${SRC_DIR}/static" ]; then
+  mkdir -p "${APP_DIR}/static"
+  cp -rf "${SRC_DIR}/static/." "${APP_DIR}/static/"
+fi
 ok "已拷贝程序源码至 ${gl_bai}${APP_DIR}${reset}"
 
 # 1.1) 拷贝运维脚本（备份/还原脚本供 CLI 调用，也便于手动执行）

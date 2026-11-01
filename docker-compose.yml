@@ -14,7 +14,8 @@ services:
       - AUTH_PASSWORD=${AUTH_PASSWORD:-admin888}
       # 生产环境请务必修改上面的默认账号密码! (可写 .env 文件覆盖, 如 AUTH_PASSWORD=xxx)
       # 建议同时设置 SECRET_KEY=<随机字符>, 否则程序会自动生成并持久化到 data/secret_key
-      # Bark 推送通知（可选，默认关闭）：
+      # Bark 推送通知（可选，默认关闭）；也可在 Web UI「账户 → 推送通知」中配置，
+      # UI 保存到 data/bark_config.json 后优先于这里的环境变量。
       - BARK_ENABLE=${BARK_ENABLE:-false}
       - BARK_KEY=${BARK_KEY:-}
       - BARK_SERVER=${BARK_SERVER:-https://api.day.app}

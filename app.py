@@ -57,6 +57,8 @@ DB_PATH.parent.mkdir(exist_ok=True)
 
 # 代理配置持久化到 data/proxy_config.json, 由 douyin_downloader 托管读写
 douyin_downloader.set_proxy_file(str(DB_PATH.parent / 'proxy_config.json'))
+# Bark 配置持久化到 data/bark_config.json, 由 bark_notify 托管读写
+bark_notify.set_config_file(str(DB_PATH.parent / 'bark_config.json'))
 
 
 def _load_or_create_secret_key():
@@ -262,7 +264,31 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 初始化数据库
+def check_data_integrity():
+    """启动时轻量检查持久化数据，只记录日志，不阻断服务启动。"""
+    log = logging.getLogger(__name__)
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        try:
+            row = conn.execute('PRAGMA quick_check').fetchone()
+        finally:
+            conn.close()
+        if not row or row[0] != 'ok':
+            log.warning(f"数据完整性检查异常: {DB_PATH} -> {row}")
+    except sqlite3.Error as e:
+        log.warning(f"数据完整性检查失败: {DB_PATH} -> {e}")
+
+    bark_file = DB_PATH.parent / 'bark_config.json'
+    if bark_file.exists():
+        try:
+            with open(bark_file, encoding='utf-8') as f:
+                json.load(f)
+        except Exception as e:
+            log.warning(f"Bark 配置文件损坏: {bark_file} -> {e}")
+
+
+# 启动时先检查已有数据，再初始化数据库
+check_data_integrity()
 init_db()
 
 
@@ -1275,6 +1301,54 @@ def proxy_config_test():
     logging.getLogger(__name__).info(
         f"代理连通测试通过: {test_url} {int(latency_ms)}ms" + (f" 出口IP {ip}" if ip else ""))
     return jsonify({'ok': True, 'latency_ms': round(latency_ms, 1), 'ip': ip})
+
+
+@app.route('/api/bark-config', methods=['GET'])
+@login_required
+def bark_config_get():
+    """获取当前 Bark 配置（Web UI 配置优先，环境变量兜底）。"""
+    resp = jsonify(bark_notify.load_config().to_dict())
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/api/bark-config', methods=['POST'])
+@login_required
+def bark_config_post():
+    """保存 Bark 配置到 data/bark_config.json，后续下载立即生效。"""
+    data = request.get_json(silent=True) or {}
+    cfg = bark_notify.BarkConfig.from_mapping(data, bark_notify.load_config())
+    error = bark_notify.validate_config(cfg)
+    if error:
+        return jsonify({'error': error}), 400
+    try:
+        bark_notify.save_config(cfg)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"保存 Bark 配置失败: {e}")
+        return jsonify({'error': f'保存失败: {e}'}), 500
+    logging.getLogger(__name__).info(
+        f"Bark 配置已更新: {'启用' if cfg.enable else '关闭'}")
+    resp = jsonify({'status': 'ok', **cfg.to_dict()})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/api/bark-config/test', methods=['POST'])
+@login_required
+def bark_config_test():
+    """使用表单当前值发送测试推送，不保存配置。"""
+    data = request.get_json(silent=True) or {}
+    cfg = bark_notify.BarkConfig.from_mapping(data, bark_notify.load_config())
+    error = bark_notify.validate_config(cfg)
+    if not cfg.key:
+        error = error or '请填写 Bark 设备 Key'
+    if error:
+        return jsonify({'error': error}), 400
+    if not bark_notify.send_test(cfg):
+        return jsonify({
+            'error': '推送失败，请检查服务地址、设备 Key 和服务器网络'
+        }), 502
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/api/douyin/info', methods=['POST'])

@@ -494,10 +494,16 @@
             padding: 2rem;
             width: 100%;
             max-width: 420px;
+            max-height: 90vh;
+            overflow-y: auto;
         }
+        .account-modal.bark-modal { max-width: 480px; }
         .account-modal h2 { font-size: 1.1rem; margin-bottom: 1.5rem; }
         .account-section { margin-bottom: 1.5rem; }
         .account-section h3 { font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.6rem; }
+        .account-hint { font-size: 0.78rem; line-height: 1.5; color: var(--text-muted); margin-bottom: 0.6rem; }
+        .bark-sound-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+        @media (max-width: 420px) { .bark-sound-grid { grid-template-columns: 1fr; } }
         .account-field { margin-bottom: 0.6rem; }
         .account-field input {
             width: 100%;
@@ -1012,6 +1018,11 @@
             <button class="btn-account" onclick="doChangePassword()">修改密码</button>
         </div>
         <div class="account-section">
+            <h3>🔔 推送通知 <span class="proxy-status" id="barkStatus"></span></h3>
+            <p class="account-hint">下载完成或失败时通过 Bark 推送到手机，配置会持久化到 data 目录。</p>
+            <button class="btn-account" onclick="openBarkModal()">配置 Bark 通知</button>
+        </div>
+        <div class="account-section">
             <h3>🌐 网络代理 <span class="proxy-status" id="proxyStatus"></span></h3>
             <div class="account-field"><input type="text" id="proxyUrl" placeholder="如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"></div>
             <div class="account-field proxy-row">
@@ -1024,6 +1035,50 @@
             <span class="proxy-test-result" id="proxyTestResult"></span>
         </div>
         <button class="btn-logout" onclick="doLogout()">退出登录</button>
+    </div>
+</div>
+
+<!-- Bark Notify Modal -->
+<div class="modal" id="barkModal" onclick="closeBarkModal(event)">
+    <div class="account-modal bark-modal">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+            <h2>🔔 Bark 推送通知</h2>
+            <button class="modal-close" style="position:static;" onclick="closeBarkModal()">&times;</button>
+        </div>
+        <div class="account-section">
+            <p class="account-hint">配置保存在 <code>data/bark_config.json</code>，保存后立即生效，无需重启服务。</p>
+            <div class="account-field proxy-row">
+                <label class="proxy-option"><input type="checkbox" id="barkEnabled"> 启用 Bark 推送</label>
+            </div>
+            <div class="account-field">
+                <input type="text" id="barkKey" placeholder="Bark 设备 Key（必填）" autocomplete="off">
+            </div>
+            <div class="account-field">
+                <input type="text" id="barkServer" placeholder="Bark 服务地址，默认 https://api.day.app" autocomplete="off">
+            </div>
+            <div class="account-field">
+                <input type="text" id="barkIcon" placeholder="推送图标直链（可选，iOS 15+）" autocomplete="off">
+            </div>
+            <div class="account-field">
+                <input type="text" id="barkGroup" placeholder="通知分组（可选，如 fan-video-dl）" autocomplete="off">
+            </div>
+            <div class="account-field bark-sound-grid">
+                <input type="text" id="barkSoundSuccess" placeholder="成功铃声 bell">
+                <input type="text" id="barkSoundError" placeholder="失败铃声 alarm">
+                <input type="text" id="barkSoundInfo" placeholder="提示铃声 none">
+            </div>
+            <div class="account-field">
+                <input type="number" id="barkTimeout" min="1" max="60" step="1" placeholder="请求超时（秒），默认 5">
+            </div>
+            <p class="account-hint">图标需填写图片直链（不是网页），建议 HTTPS、正方形 PNG/JPG；留空使用 Bark 默认图标。</p>
+        </div>
+        <div class="account-section">
+            <div class="account-field proxy-btns">
+                <button class="btn-account" onclick="testBarkConfig(event)">发送测试推送</button>
+                <button class="btn-account" onclick="saveBarkConfig(event)">保存配置</button>
+            </div>
+            <span class="proxy-test-result" id="barkTestResult"></span>
+        </div>
     </div>
 </div>
 
@@ -1120,6 +1175,7 @@ async function doLogout() {
 function showAccountModal() {
     document.getElementById('accountModal').classList.add('active');
     loadProxyConfig();
+    loadBarkConfig();
 }
 function closeAccountModal(e) {
     if (e && e.target !== e.currentTarget) return;
@@ -1203,6 +1259,108 @@ async function saveProxyConfig(e) {
     } finally {
         btn.disabled = false;
         btn.textContent = oldText;
+    }
+}
+
+// === Bark 推送通知 ===
+function updateBarkStatus(enabled) {
+    const el = document.getElementById('barkStatus');
+    if (!el) return;
+    el.textContent = enabled ? '已启用' : '未启用';
+    el.classList.toggle('on', !!enabled);
+}
+function openBarkModal() {
+    closeAccountModal();
+    document.getElementById('barkModal').classList.add('active');
+    loadBarkConfig();
+}
+function closeBarkModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('barkModal').classList.remove('active');
+}
+async function loadBarkConfig() {
+    try {
+        const resp = await fetch('/api/bark-config');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        document.getElementById('barkEnabled').checked = !!data.enabled;
+        document.getElementById('barkKey').value = data.key || '';
+        document.getElementById('barkServer').value = data.server || '';
+        document.getElementById('barkIcon').value = data.icon || '';
+        document.getElementById('barkGroup').value = data.group || '';
+        document.getElementById('barkSoundSuccess').value = data.sound_success || '';
+        document.getElementById('barkSoundError').value = data.sound_error || '';
+        document.getElementById('barkSoundInfo').value = data.sound_info || '';
+        document.getElementById('barkTimeout').value = data.timeout || '';
+        updateBarkStatus(data.enabled && !!data.key);
+    } catch(e) { /* 忽略加载失败 */ }
+}
+function collectBarkConfig() {
+    const timeoutRaw = document.getElementById('barkTimeout').value.trim();
+    return {
+        enabled: document.getElementById('barkEnabled').checked,
+        key: document.getElementById('barkKey').value.trim(),
+        server: document.getElementById('barkServer').value.trim(),
+        icon: document.getElementById('barkIcon').value.trim(),
+        group: document.getElementById('barkGroup').value.trim(),
+        sound_success: document.getElementById('barkSoundSuccess').value.trim(),
+        sound_error: document.getElementById('barkSoundError').value.trim(),
+        sound_info: document.getElementById('barkSoundInfo').value.trim(),
+        timeout: timeoutRaw ? Number(timeoutRaw) : 5,
+    };
+}
+function showBarkTestResult(text, cls) {
+    const el = document.getElementById('barkTestResult');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'proxy-test-result' + (cls ? ' ' + cls : '');
+}
+async function testBarkConfig(e) {
+    const cfg = collectBarkConfig();
+    if (!cfg.key) { showToast('请先填写 Bark 设备 Key', 'error'); return; }
+    const btn = (e || event).target;
+    btn.disabled = true;
+    showBarkTestResult('⏳ 发送中…', '');
+    try {
+        const resp = await fetch('/api/bark-config/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cfg)
+        });
+        const data = await resp.json();
+        if (resp.ok && data.status === 'ok') {
+            showBarkTestResult('✅ 测试推送已发送，请查看手机', 'ok');
+        } else {
+            showBarkTestResult('❌ ' + (data.error || '推送失败'), 'err');
+        }
+    } catch(err) {
+        showBarkTestResult('❌ 请求失败: ' + err.message, 'err');
+    } finally {
+        btn.disabled = false;
+    }
+}
+async function saveBarkConfig(e) {
+    const cfg = collectBarkConfig();
+    if (cfg.enabled && !cfg.key) { showToast('启用推送需填写设备 Key', 'error'); return; }
+    const btn = (e || event).target;
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/bark-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cfg)
+        });
+        const data = await resp.json();
+        if (resp.ok && data.status === 'ok') {
+            showToast(data.enabled ? '推送通知已启用' : '推送通知已关闭', 'success');
+            updateBarkStatus(data.enabled && !!data.key);
+        } else {
+            showToast(data.error || '保存失败', 'error');
+        }
+    } catch(err) {
+        showToast('请求失败: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
     }
 }
 
@@ -1582,6 +1740,12 @@ function updateThemeIcon() {
 }
 
 // === Init ===
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeBarkModal();
+        closeAccountModal();
+    }
+});
 updateThemeIcon();
 checkAuth();
 </script>

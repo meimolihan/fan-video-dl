@@ -13,10 +13,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ logger = logging.getLogger(__name__)
 #	BARK_TIMEOUT        单次 HTTP 请求超时（秒）。默认：5
 #
 # 说明：
+#   - Web UI 保存的配置持久化到 data/bark_config.json，优先级高于环境变量；
+#     文件不存在或读取失败时自动回退到环境变量，保证旧部署方式兼容。
 #   - 中文标题/内容自动做 URL 编码，避免乱码。
 #   - 仅发起一次请求，失败只记录日志，不重试、不阻塞调用方。
 #   - 异步入口在独立 daemon 线程中执行，调用方立即返回。
@@ -73,6 +76,15 @@ _SOUND_SUCCESS = "bell"
 _SOUND_ERROR = "alarm"
 _SOUND_INFO = "none"
 
+# 由 app.py 启动时注入（data/bark_config.json）；未注入时仅使用环境变量
+_config_file = None
+
+
+def set_config_file(path: str) -> None:
+    """设置持久化配置文件路径。由 app.py 在启动时调用。"""
+    global _config_file
+    _config_file = str(path) if path else None
+
 
 def _env_str(name: str, default: str = "") -> str:
     value = os.environ.get(name, "")
@@ -98,9 +110,17 @@ def _env_float(name: str, default: float) -> float:
     return parsed if parsed > 0 else default
 
 
+def _as_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "on", "yes", "enabled")
+
+
 @dataclass(frozen=True)
 class BarkConfig:
-    """Bark 配置快照（从环境变量加载，业务代码无需关心配置细节）。"""
+    """Bark 配置快照（业务代码无需关心配置来自环境变量还是 Web UI）。"""
 
     enable: bool
     key: str
@@ -127,10 +147,121 @@ class BarkConfig:
             timeout=_env_float("BARK_TIMEOUT", DEFAULT_TIMEOUT),
         )
 
+    @classmethod
+    def from_mapping(cls, data, base: "BarkConfig | None" = None) -> "BarkConfig":
+        """从 Web UI/JSON 字段构造配置；缺失字段沿用 base（默认环境变量）。"""
+        base = base or cls.from_env()
+        if not isinstance(data, dict):
+            return base
+
+        def text(name: str, current: str) -> str:
+            if name not in data:
+                return current
+            value = data.get(name)
+            return "" if value is None else str(value).strip()
+
+        def flag(names, current: bool) -> bool:
+            for name in names:
+                if name in data:
+                    return _as_bool(data.get(name), current)
+            return current
+
+        def number(name: str, current: float) -> float:
+            if name not in data:
+                return current
+            try:
+                parsed = float(data.get(name))
+            except (TypeError, ValueError):
+                return current
+            return parsed if parsed > 0 else current
+
+        server = text("server", base.server).rstrip("/") or DEFAULT_SERVER
+        return cls(
+            enable=flag(("enabled", "enable"), base.enable),
+            key=text("key", base.key),
+            server=server,
+            icon=text("icon", base.icon),
+            group=text("group", base.group),
+            sound_success=text("sound_success", base.sound_success),
+            sound_error=text("sound_error", base.sound_error),
+            sound_info=text("sound_info", base.sound_info),
+            timeout=number("timeout", base.timeout),
+        )
+
+    def to_dict(self) -> dict:
+        """转为 Web UI / 持久化文件使用的字段（不含任何环境变量信息）。"""
+        return {
+            "enabled": self.enable,
+            "key": self.key,
+            "server": self.server,
+            "icon": self.icon,
+            "group": self.group,
+            "sound_success": self.sound_success,
+            "sound_error": self.sound_error,
+            "sound_info": self.sound_info,
+            "timeout": self.timeout,
+        }
+
 
 def load_config() -> BarkConfig:
-    """读取当前环境变量。每次推送重新读取，便于运行期调整配置。"""
-    return BarkConfig.from_env()
+    """
+    读取当前配置：环境变量作为兜底，data/bark_config.json 覆盖同名字段。
+
+    每次推送重新读取，Web UI 保存后无需重启即可生效。
+    """
+    config = BarkConfig.from_env()
+    path = _config_file
+    if not path or not os.path.isfile(path):
+        return config
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        logger.warning("[bark] 读取配置文件失败 %s: %s", path, exc)
+        return config
+    if not isinstance(data, dict):
+        logger.warning("[bark] 配置文件格式错误，已回退环境变量: %s", path)
+        return config
+    return BarkConfig.from_mapping(data, config)
+
+
+def save_config(config: BarkConfig) -> None:
+    """原子写入配置文件，避免备份/断电时产生半截 JSON。"""
+    if not _config_file:
+        raise RuntimeError("未设置 Bark 配置文件路径")
+    parent = os.path.dirname(os.path.abspath(_config_file))
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".bark_config.", suffix=".tmp", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, _config_file)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    logger.info("[bark] 配置已保存: %s", _config_file)
+
+
+def validate_config(config: BarkConfig) -> str:
+    """校验配置，返回错误信息；空字符串表示通过。"""
+    if config.enable and not config.key:
+        return "启用推送时需要填写 Bark 设备 Key"
+    for label, value in (("Bark 服务地址", config.server), ("图标地址", config.icon)):
+        if not value:
+            continue
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return f"{label}必须是完整的 http(s) URL"
+    if config.timeout < 1 or config.timeout > 60:
+        return "超时时间需在 1-60 秒之间"
+    return ""
 
 
 def is_enabled() -> bool:
@@ -185,7 +316,8 @@ def build_url(
     return f"{config.server}/{quote(config.key, safe='')}?{query}"
 
 
-def notify(
+def _send_with_config(
+    config: BarkConfig,
     level: str,
     title: str,
     content: str,
@@ -194,27 +326,7 @@ def notify(
     group: str = "",
     mute: bool = False,
 ) -> bool:
-    """
-    统一通知函数（同步执行）。
-
-    参数：
-        level:    通知级别，LEVEL_SUCCESS / LEVEL_ERROR / LEVEL_INFO，决定铃声
-        title:    推送标题
-        content:  推送内容（中文自动 URL 编码）
-        icon:     推送图标 URL，为空时使用 BARK_ICON
-        jump_url: 点击通知跳转的 URL
-        group:    通知分组，为空时使用 BARK_GROUP
-        mute:     是否静音；为 True 时强制 sound=none 且 level=passive
-
-    返回是否推送成功。任何异常都会被捕获并记录日志，不会向调用方抛出。
-    """
-    config = load_config()
-    if not config.enable:
-        return False
-    if not config.key:
-        logger.warning("[bark] BARK_ENABLE=true 但未配置 BARK_KEY，跳过推送")
-        return False
-
+    """使用给定配置发送一次请求（同步，供 notify / 测试接口复用）。"""
     try:
         target = build_url(config, level, title, content, icon, jump_url, group, mute)
         request = Request(
@@ -269,6 +381,50 @@ def notify(
     except Exception as exc:  # 兜底：推送绝不影响主流程
         logger.warning("[bark] 推送失败 level=%s title=%r: %s", level, title, exc)
         return False
+
+
+def notify(
+    level: str,
+    title: str,
+    content: str,
+    icon: str = "",
+    jump_url: str = "",
+    group: str = "",
+    mute: bool = False,
+) -> bool:
+    """
+    统一通知函数（同步执行）。
+
+    参数：
+        level:    通知级别，LEVEL_SUCCESS / LEVEL_ERROR / LEVEL_INFO，决定铃声
+        title:    推送标题
+        content:  推送内容（中文自动 URL 编码）
+        icon:     推送图标 URL，为空时使用已保存配置
+        jump_url: 点击通知跳转的 URL
+        group:    通知分组，为空时使用已保存配置
+        mute:     是否静音；为 True 时强制 sound=none 且 level=passive
+
+    返回是否推送成功。任何异常都会被捕获并记录日志，不会向调用方抛出。
+    """
+    config = load_config()
+    if not config.enable:
+        return False
+    if not config.key:
+        logger.warning("[bark] 推送已启用但未配置设备 Key，跳过推送")
+        return False
+    return _send_with_config(config, level, title, content, icon, jump_url, group, mute)
+
+
+def send_test(
+    config: BarkConfig,
+    title: str = "Bark 推送测试",
+    content: str = "如果你收到这条消息，说明 Bark 推送配置正确。",
+) -> bool:
+    """使用指定配置发送测试推送，不受“启用”开关限制（便于保存前测试）。"""
+    if not config.key:
+        logger.warning("[bark] 测试推送失败：未配置设备 Key")
+        return False
+    return _send_with_config(config, LEVEL_SUCCESS, title, content)
 
 
 def notify_async(

@@ -77,11 +77,55 @@ BACKUP_FILE="${BACKUP_DIR}/FanVideoDL-${NOW}.tar.gz"
 mkdir -p "${BACKUP_DIR}"
 
 # 在线备份：不停止服务，避免面板自身被 systemctl stop 连带终止（面板与脚本同属系统服务）
+# users.db 使用 SQLite 在线备份接口生成一致性快照，避免直接打包运行中的数据库
+TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fan-video-dl-backup.XXXXXX") || {
+    echo -e "${gl_hong}❌ 无法创建临时目录${gl_bai}"
+    exit 1
+}
+cleanup_tmp() { rm -rf "${TMP_DIR}"; }
+trap cleanup_tmp EXIT
+
+DB_SNAP=""
+if [ -f "${DATA_DIR}/users.db" ]; then
+    echo -e "${gl_lan}>>> 校验并快照 SQLite 数据库${gl_bai}"
+    if ! python3 - "${DATA_DIR}/users.db" "${TMP_DIR}/users.db" <<'PY'
+import sqlite3
+import sys
+
+src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=10)
+dst = sqlite3.connect(sys.argv[2], timeout=10)
+try:
+    row = src.execute("PRAGMA quick_check").fetchone()
+    if not row or row[0] != "ok":
+        raise SystemExit(f"users.db quick_check failed: {row}")
+    src.backup(dst)
+finally:
+    dst.close()
+    src.close()
+PY
+    then
+        echo -e "${gl_hong}❌ 数据库校验/快照失败，已中止备份${gl_bai}"
+        exit 1
+    fi
+    DB_SNAP="${TMP_DIR}/users.db"
+fi
+
 echo -e ""
 echo -e "${gl_lan}>>> 执行备份：${BACKUP_FILE}${gl_bai}"
-if tar -czf "${BACKUP_FILE}" -C "${DATA_DIR}" .; then
+TAR_OK=1
+if [ -n "${DB_SNAP}" ]; then
+    # -C 可分段使用：先打包数据目录（排除运行中的数据库与 WAL），
+    # 再从临时目录追加一致性快照 users.db，全程流式 gzip，不复制整个数据目录。
+    tar -czf "${BACKUP_FILE}" -C "${DATA_DIR}" \
+        --exclude='./users.db' --exclude='./users.db-wal' --exclude='./users.db-shm' \
+        . -C "${TMP_DIR}" users.db || TAR_OK=0
+else
+    tar -czf "${BACKUP_FILE}" -C "${DATA_DIR}" . || TAR_OK=0
+fi
+if [ "${TAR_OK}" -eq 1 ] && gzip -t "${BACKUP_FILE}"; then
     echo -e "${gl_lv}>>> 备份完成：${BACKUP_FILE}${gl_bai}"
 else
+    rm -f "${BACKUP_FILE}"
     echo -e "${gl_hong}❌ 备份失败${gl_bai}"
     exit 1
 fi

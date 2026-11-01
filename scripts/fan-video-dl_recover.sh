@@ -99,6 +99,38 @@ else
     exit 1
 fi
 
+# 恢复后做一次轻量完整性检查：数据库可读、Bark 配置 JSON 合法
+if command -v python3 >/dev/null 2>&1; then
+    echo -e "${gl_lan}>>> 检查恢复数据完整性${gl_bai}"
+    if python3 - "${DATA_DIR}" <<'PY'
+import json
+import os
+import sqlite3
+import sys
+
+root = sys.argv[1]
+db_path = os.path.join(root, "users.db")
+if os.path.exists(db_path):
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+    try:
+        row = conn.execute("PRAGMA quick_check").fetchone()
+    finally:
+        conn.close()
+    if not row or row[0] != "ok":
+        raise SystemExit(f"users.db quick_check failed: {row}")
+
+bark_path = os.path.join(root, "bark_config.json")
+if os.path.exists(bark_path):
+    with open(bark_path, encoding="utf-8") as f:
+        json.load(f)
+PY
+    then
+        echo -e "${gl_lv}>>> 数据完整性检查通过${gl_bai}"
+    else
+        echo -e "${gl_huang}⚠️ 数据完整性检查未通过，请检查备份文件或查看服务日志${gl_bai}"
+    fi
+fi
+
 echo -e ""
 echo -e "${gl_huang}>>> 重载systemd配置并启动服务${gl_bai}"
 systemctl daemon-reload

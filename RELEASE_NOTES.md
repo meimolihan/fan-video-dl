@@ -1,4 +1,4 @@
-增加 Bark 推送通知功能
+增加 Bark 推送通知功能（支持 Web UI 配置、持久化到数据目录，并随备份/恢复脚本完整迁移）
 
 ```bash
 docker pull mobufan/fan-video-dl:latest

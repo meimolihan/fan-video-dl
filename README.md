@@ -134,6 +134,12 @@ python app.py
 
 下载任务结束时自动推送：**成功**发送成功通知，**失败**发送告警通知；下载仍完成但音频提取失败时发送普通提示。推送通过独立线程异步执行，Bark 服务超时、失败或配置错误**不会阻塞下载主流程**，失败只记录日志且不重试。
 
+**Web UI 配置（推荐）：**
+
+登录后点击右上角 **账户 → 🔔 推送通知 → 配置 Bark 通知**，填写设备 Key、服务地址等信息，可先“发送测试推送”确认配置正确，再保存。配置保存在 `data/bark_config.json`，保存后立即生效，无需重启；该文件位于持久化数据目录，会被备份/恢复脚本完整包含。
+
+> Web UI 保存的配置优先于环境变量；未保存过配置时继续使用下面的环境变量，兼容旧部署方式。
+
 **Docker Compose 配置示例：**
 
 ```yaml
@@ -199,20 +205,36 @@ bark_notify.notify_async(
 )
 ```
 
+### 数据持久化与备份
+
+以下文件都位于持久化数据目录 `data/`：
+
+| 文件 | 说明 |
+|---|---|
+| `users.db` | 用户账号与密码哈希 |
+| `secret_key` | Flask Session 密钥 |
+| `proxy_config.json` | 网络代理配置 |
+| `bark_config.json` | Bark 推送配置（Web UI 保存） |
+
+- Docker 部署需保留 `./data:/app/data` 挂载，重建容器不会丢失配置。
+- systemd 安装时 `APP_DIR/data` 会链接到安装记录中的 `DATA_DIR`。
+- `scripts/fan-video-dl_backup.sh` 备份整个数据目录，并对 `users.db` 使用 SQLite 在线快照，避免直接打包运行中的数据库。
+- `scripts/fan-video-dl_recover.sh` 恢复后会执行 `PRAGMA quick_check` 并校验 `bark_config.json`，确保持久化链完整。
+
 ## 📂 目录结构
 
 ```
 fan-video-dl/
 ├── app.py                 # Flask 后端
 ├── douyin_downloader.py   # 抖音无水印下载模块（含 ttwid 自动刷新）
-├── bark_notify.py         # Bark 推送通知模块（可选，环境变量配置）
+├── bark_notify.py         # Bark 推送通知模块（UI/环境变量配置，持久化到 data）
 ├── cli.py                 # 内置 CLI 管理命令 (status/credentials/uninstall 等)
 ├── templates/
 │   └── index.html         # Web UI（明暗主题）
 ├── scripts/               # 运维脚本 (install/uninstall/backup/recover/build-and-push)
 ├── version.txt            # 版本号（发版脚本维护）
 ├── downloads/             # 下载文件目录
-├── data/                  # 用户数据库 + 持久化 SECRET_KEY
+├── data/                  # 用户数据库 + SECRET_KEY + 代理/Bark 配置
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
