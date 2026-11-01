@@ -553,6 +553,11 @@ Environment=PORT=${PORT}
 Environment=AUTH_USERNAME=${AUTH_USERNAME}
 Environment=AUTH_PASSWORD=${AUTH_PASSWORD}
 Environment=TZ=Asia/Shanghai
+# Bark 推送通知（可选）：取消下面注释并填写设备 Key 后重启服务
+#Environment=BARK_ENABLE=true
+#Environment=BARK_KEY=your-device-key
+#Environment=BARK_SERVER=https://api.day.app
+#Environment=BARK_GROUP=fan-video-dl
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=20

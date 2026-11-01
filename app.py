@@ -26,6 +26,7 @@ from flask import Flask, request, jsonify, send_file, render_template, session
 from pathlib import Path
 
 import douyin_downloader
+import bark_notify
 
 # ─── 版本号 ───
 # 优先读环境变量 APP_VERSION(CI构建时注入), 其次读取仓库根 version.txt(发版脚本维护), 最后本地开发用日期版本
@@ -279,6 +280,58 @@ def get_file_size_str(size_bytes):
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
     return f"{size_bytes:.1f} PB"
+
+
+# ─── Bark 推送通知（可选，异步发送；失败只记日志，不影响下载主流程） ───
+def _bark_notify_success(task, url):
+    """下载成功后推送成功通知。"""
+    filename = os.path.basename(task.get('output_file') or '') or '未知文件'
+    size = ''
+    try:
+        path = DOWNLOAD_DIR / filename
+        if path.is_file():
+            size = get_file_size_str(path.stat().st_size)
+    except OSError:
+        pass
+    lines = [f"文件：{filename}"]
+    if size:
+        lines.append(f"大小：{size}")
+    lines.append(f"链接：{url}")
+    bark_notify.success_async("视频下载完成", "\n".join(lines), jump_url=url)
+
+
+def _bark_notify_failure(task, url):
+    """下载失败后推送告警通知。"""
+    reason = (task.get('error') or '未知错误').strip()[:500]
+    bark_notify.error_async(
+        "视频下载失败",
+        f"原因：{reason}\n链接：{url}",
+        jump_url=url,
+    )
+
+
+def run_download_with_notify(task_id, url, options):
+    """
+    下载线程入口：执行原有下载逻辑，结束后按最终状态发送 Bark 通知。
+
+    通知走异步入口，因此 Bark 服务不可用、超时或配置错误都不会阻塞下载。
+    """
+    try:
+        run_download(task_id, url, options)
+    except Exception as exc:
+        logging.getLogger(__name__).exception("下载线程异常 task=%s", task_id)
+        with tasks_lock:
+            task = tasks.get(task_id)
+            if task and task.get('status') not in ('completed', 'failed'):
+                task['status'] = 'failed'
+                task['error'] = f'下载线程异常: {exc}'
+    finally:
+        with tasks_lock:
+            task = dict(tasks.get(task_id) or {})
+        if task.get('status') == 'completed':
+            _bark_notify_success(task, url)
+        elif task.get('status') == 'failed':
+            _bark_notify_failure(task, url)
 
 
 def extract_real_video_url(url):
@@ -659,9 +712,19 @@ def run_douyin_download(task_id, url, options):
                 else:
                     with tasks_lock:
                         task['error'] = f'音频提取失败, 保留视频文件'
+                    bark_notify.info_async(
+                        "音频提取失败",
+                        f"已保留原视频文件，可继续下载\n链接：{url}",
+                        jump_url=url,
+                    )
             except Exception as ae:
                 with tasks_lock:
                     task['error'] = f'音频提取异常: {str(ae)}, 保留视频文件'
+                bark_notify.info_async(
+                    "音频提取异常",
+                    f"已保留原视频文件，可继续下载\n原因：{ae}\n链接：{url}",
+                    jump_url=url,
+                )
 
         filename = ensure_browser_playable(filename, task)
         with tasks_lock:
@@ -1278,7 +1341,7 @@ def start_download():
             'concurrent': data.get('concurrent', 10),
         }
 
-    thread = threading.Thread(target=run_download, args=(task_id, url, data), daemon=True)
+    thread = threading.Thread(target=run_download_with_notify, args=(task_id, url, data), daemon=True)
     thread.start()
 
     return jsonify({'task_id': task_id, 'status': 'queued'})

@@ -120,6 +120,84 @@ python app.py
 | `AUTH_USERNAME` | admin | 登录用户名 |
 | `AUTH_PASSWORD` | admin888 | 登录密码 |
 | `SECRET_KEY` | 自动生成并持久化 | Flask Session 密钥（重启后保持登录） |
+| `BARK_ENABLE` | false | Bark 推送总开关，关闭时不发起任何推送 |
+| `BARK_KEY` | - | Bark 设备 Key（启用时必填） |
+| `BARK_SERVER` | https://api.day.app | Bark 服务地址，支持自建服务器 |
+| `BARK_ICON` | - | 默认推送图标 URL（iOS 15+） |
+| `BARK_GROUP` | - | 默认通知分组 |
+| `BARK_SOUND_SUCCESS` | bell | 成功通知铃声 |
+| `BARK_SOUND_ERROR` | alarm | 失败告警铃声 |
+| `BARK_SOUND_INFO` | none | 普通提示铃声 |
+| `BARK_TIMEOUT` | 5 | 单次推送请求超时（秒） |
+
+### Bark 推送通知（可选）
+
+下载任务结束时自动推送：**成功**发送成功通知，**失败**发送告警通知；下载仍完成但音频提取失败时发送普通提示。推送通过独立线程异步执行，Bark 服务超时、失败或配置错误**不会阻塞下载主流程**，失败只记录日志且不重试。
+
+**Docker Compose 配置示例：**
+
+```yaml
+services:
+  fan-video-dl:
+    environment:
+      - BARK_ENABLE=true
+      - BARK_KEY=your-device-key
+      - BARK_SERVER=https://api.day.app   # 自建服务改成自己的地址
+      - BARK_GROUP=fan-video-dl
+      # - BARK_ICON=https://example.com/icon.png
+      # - BARK_SOUND_SUCCESS=bell
+      # - BARK_SOUND_ERROR=alarm
+      # - BARK_SOUND_INFO=none
+      # - BARK_TIMEOUT=5
+```
+
+**systemd 部署配置示例：**
+
+```bash
+sudo systemctl edit fan-video-dl
+```
+
+在打开的覆盖配置中填写：
+
+```ini
+[Service]
+Environment=BARK_ENABLE=true
+Environment=BARK_KEY=your-device-key
+Environment=BARK_SERVER=https://api.day.app
+Environment=BARK_GROUP=fan-video-dl
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart fan-video-dl
+```
+
+**推送图标要求：**`BARK_ICON` 填图片直链（不是网页），建议 HTTPS、正方形 PNG/JPG（如 512×512），手机端需能访问且 10 秒内下载完成；仅 iOS 15+ 显示，留空使用 Bark 默认图标。
+
+**代码内调用示例：**
+
+```python
+import bark_notify
+
+# 成功通知
+bark_notify.success("视频下载完成", "文件：demo.mp4", jump_url="https://example.com")
+
+# 失败告警
+bark_notify.error("视频下载失败", "原因：网络超时")
+
+# 普通提示
+bark_notify.info("系统提示", "服务将于 10 分钟后重启")
+
+# 完整参数（级别、标题、内容、图标、跳转URL、分组、是否静音）
+bark_notify.notify_async(
+    bark_notify.LEVEL_ERROR,
+    "磁盘告警",
+    "根分区使用率 95%",
+    icon="https://example.com/icon.png",
+    jump_url="https://panel.example.com",
+    group="fan-video-dl",
+    mute=False,
+)
+```
 
 ## 📂 目录结构
 
@@ -127,6 +205,7 @@ python app.py
 fan-video-dl/
 ├── app.py                 # Flask 后端
 ├── douyin_downloader.py   # 抖音无水印下载模块（含 ttwid 自动刷新）
+├── bark_notify.py         # Bark 推送通知模块（可选，环境变量配置）
 ├── cli.py                 # 内置 CLI 管理命令 (status/credentials/uninstall 等)
 ├── templates/
 │   └── index.html         # Web UI（明暗主题）
